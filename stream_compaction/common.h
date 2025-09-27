@@ -12,6 +12,8 @@
 #include <string>
 #include <map>
 
+#include "../src/sceneStructs.h"
+
 #define FILENAME (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
 #define checkCUDAError(msg) checkCUDAErrorFn(msg, FILENAME, __LINE__)
 
@@ -35,9 +37,11 @@ inline int ilog2ceil(int x) {
 namespace StreamCompaction {
     namespace Common {
         __global__ void kernMapToBoolean(int n, int *bools, const int *idata);
+        __global__ void kernMapToBoolean(int n, int* bools, PathSegment* pathSegments);
 
         __global__ void kernScatter(int n, int *odata,
                 const int *idata, const int *bools, const int *indices);
+        __global__ void kernScatter(int n, PathSegment* odata, PathSegment* idata, int* bools, int* indices);
 
         /**
         * This class is used for timing the performance

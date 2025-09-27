@@ -1,5 +1,7 @@
 #include "common.h"
 
+#include "../src/sceneStructs.h"
+
 static void checkCUDAErrorFn(const char *msg, const char *file, int line) {
     cudaError_t err = cudaGetLastError();
     if (cudaSuccess == err) {
@@ -28,6 +30,11 @@ namespace StreamCompaction {
             if (i >= n) return;
             bools[i] = (idata[i] != 0) ? 1 : 0;
         }
+        __global__ void kernMapToBoolean(int n, int* bools, PathSegment* pathSegments) {
+            int i = blockIdx.x * blockDim.x + threadIdx.x;
+            if (i >= n) return;
+            bools[i] = (pathSegments[i].remainingBounces > 0) ? 1 : 0;
+        }
 
         /**
          * Performs scatter on an array. That is, for each element in idata,
@@ -42,6 +49,15 @@ namespace StreamCompaction {
             if (bools[i] == 1) {
                 int index = indices[i];
                 odata[index] = idata[i];
+            }
+        }
+
+        __global__ void kernScatter(int n, PathSegment* odata, PathSegment* idata, int* bools, int* indices) {
+            int i = blockIdx.x * blockDim.x + threadIdx.x;
+            if (i >= n) return;
+            if (bools[i] == 1) {
+                int pos = indices[i];
+                odata[pos] = idata[i];
             }
         }
 

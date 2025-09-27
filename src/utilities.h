@@ -18,8 +18,12 @@
 class GuiDataContainer
 {
 public:
-    GuiDataContainer() : TracedDepth(0) {}
+    GuiDataContainer() : TracedDepth(0), antiAliasing(false), StratifiedSampling(false), Strata(4), MaxSPP(1024) {}
     int TracedDepth;
+    bool antiAliasing;
+    bool StratifiedSampling;
+    int Strata;
+    int MaxSPP;
 };
 
 namespace utilityCore

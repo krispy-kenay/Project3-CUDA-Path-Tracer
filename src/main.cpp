@@ -24,6 +24,9 @@
 #include <sstream>
 #include <string>
 
+#define SCENE "C:/Users/Shadow/Documents/GPU Programming/Project3-CUDA-Path-Tracer/scenes/cornell.json"
+
+
 static std::string startTimeString;
 
 // For camera controls
@@ -265,7 +268,7 @@ void RenderImGui()
     ImGui::NewFrame();
 
     bool show_demo_window = true;
-    bool show_another_window = false;
+    bool show_another_window = true;
     ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
     static float f = 0.0f;
     static int counter = 0;
@@ -284,8 +287,35 @@ void RenderImGui()
     //    counter++;
     //ImGui::SameLine();
     //ImGui::Text("counter = %d", counter);
+    const char* sppOptions[] = { "2", "4", "8", "16", "32", "64", "128", "256", "512", "1024" };
+    static int current = 9;
+
+    if (ImGui::Combo("Max SPP", &current, sppOptions, IM_ARRAYSIZE(sppOptions))) {
+        guiData->MaxSPP = 1 << (current + 1);
+        renderState->iterations = guiData->MaxSPP;
+        iteration = 0;
+        camchanged = true;
+    }
     ImGui::Text("Traced Depth %d", imguiData->TracedDepth);
     ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
+    bool prevAA = guiData->antiAliasing;
+    if (ImGui::Checkbox("Enable Antialiasing", &guiData->antiAliasing)) {
+        iteration = 0;
+        camchanged = true;
+    }
+    int prevStrata = guiData->Strata;
+    if (guiData->antiAliasing) {
+        if (ImGui::Checkbox("Enable Stratified Sampling", &guiData->StratifiedSampling)) {
+            iteration = 0;
+            camchanged = true;
+        }
+        if (guiData->StratifiedSampling) {
+            if (ImGui::SliderInt("Grid Size", &guiData->Strata, 1, 12)) {
+                iteration = 0;
+                camchanged = true;
+            }
+        }
+    }
     ImGui::End();
 
 
@@ -342,13 +372,17 @@ int main(int argc, char** argv)
 {
     startTimeString = currentTimeString();
 
+    const char* sceneFile = nullptr;
     if (argc < 2)
     {
-        printf("Usage: %s SCENEFILE.json\n", argv[0]);
-        return 1;
+        sceneFile = SCENE;
+        printf("No scene passed, using default: %s\n", sceneFile);
+    }
+    else {
+        sceneFile = argv[1];
     }
 
-    const char* sceneFile = argv[1];
+    //const char* sceneFile = argv[1];
 
     // Load scene file
     scene = new Scene(sceneFile);
@@ -410,7 +444,7 @@ void saveImage()
 
     std::string filename = renderState->imageName;
     std::ostringstream ss;
-    ss << filename << "." << startTimeString << "." << samples << "samp";
+    ss << filename << "." << currentTimeString() << "." << samples << "samp";
     filename = ss.str();
 
     // CHECKITOUT
@@ -465,10 +499,10 @@ void runCuda()
     }
     else
     {
-        saveImage();
-        pathtraceFree();
-        cudaDeviceReset();
-        exit(EXIT_SUCCESS);
+        //saveImage();
+        //pathtraceFree();
+        //cudaDeviceReset();
+        //exit(EXIT_SUCCESS);
     }
 }
 

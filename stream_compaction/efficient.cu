@@ -3,6 +3,8 @@
 #include "common.h"
 #include "efficient.h"
 
+#include "../src/sceneStructs.h"
+
 #define BLOCK_SIZE 256
 
 namespace StreamCompaction {
@@ -53,20 +55,41 @@ namespace StreamCompaction {
             odata[idx] = 1 - b;
         }
 
-        __global__ void kernScatterByBit(int n, int* idata, int* bitArray,
-            int* scanned, int* odata, int totalFalses) {
+        __global__ void kernScatterByBit(int n,
+            int* bitArray,
+            int* scanned,
+            PathSegment* pathsIn, PathSegment* pathsOut,
+            ShadeableIntersection* isectsIn, ShadeableIntersection* isectsOut,
+            int totalFalses)
+        {
             int idx = blockIdx.x * blockDim.x + threadIdx.x;
             if (idx >= n) return;
 
             int bit = bitArray[idx];
+            int newPos;
             if (bit == 1) {
-                odata[scanned[idx]] = idata[idx];
+                newPos = scanned[idx];
             }
             else {
-                int pos = totalFalses + (idx - scanned[idx]);
-                odata[pos] = idata[idx];
+                newPos = totalFalses + (idx - scanned[idx]);
             }
+
+            pathsOut[newPos] = pathsIn[idx];
+            isectsOut[newPos] = isectsIn[idx];
         }
+
+        __global__ void kernScatterPartition(int n, PathSegment* inPaths, PathSegment* outPaths, int* flags, int* scanned, int totalActives)
+        {
+            int i = blockIdx.x * blockDim.x + threadIdx.x;
+            if (i >= n) return;
+
+            int f = flags[i];
+            int pos = f ? scanned[i] : (totalActives + (i - scanned[i]));
+
+            outPaths[pos] = inPaths[i];
+        }
+
+
 
         void scanDevice(int n, int* dev_out, const int* dev_in) {
             int log2n = ilog2ceil(n);
@@ -130,69 +153,48 @@ namespace StreamCompaction {
          * @param idata  The array of elements to compact.
          * @returns      The number of elements remaining after compaction.
          */
-        int compact(int n, int *odata, const int *idata) {
-            int* dev_in, * dev_flags, * dev_indices, * dev_out;
+        int compact(int n, PathSegment* dev_in, PathSegment* dev_out) {
+            int* dev_flags, * dev_indices;
 
-            cudaMalloc(&dev_in, n * sizeof(int));
             cudaMalloc(&dev_flags, n * sizeof(int));
             cudaMalloc(&dev_indices, n * sizeof(int));
-            cudaMalloc(&dev_out, n * sizeof(int));
-
-            cudaMemcpy(dev_in, idata, n * sizeof(int), cudaMemcpyHostToDevice);
 
             int gridSize = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
-            timer().startGpuTimer();
+            //timer().startGpuTimer();
 
-            timer().startGpuSubTimer("map");
             StreamCompaction::Common::kernMapToBoolean<<<gridSize, BLOCK_SIZE >>>(n, dev_flags, dev_in);
             cudaDeviceSynchronize();
-            timer().endGpuSubTimer();
 
-            timer().startGpuSubTimer("scan");
             scanDevice(n, dev_indices, dev_flags);
             cudaDeviceSynchronize();
-            timer().endGpuSubTimer();
 
             int lastScan, lastFlag;
             cudaMemcpy(&lastScan, dev_indices + (n - 1), sizeof(int), cudaMemcpyDeviceToHost);
             cudaMemcpy(&lastFlag, dev_flags + (n - 1), sizeof(int), cudaMemcpyDeviceToHost);
             int validCount = lastScan + lastFlag;
 
-            timer().startGpuSubTimer("scatter");
-            StreamCompaction::Common::kernScatter<<<gridSize, BLOCK_SIZE >>>(n, dev_out, dev_in, dev_flags, dev_indices);
+            kernScatterPartition<<<gridSize, BLOCK_SIZE >>>(n, dev_in, dev_out, dev_flags, dev_indices, validCount);
             cudaDeviceSynchronize();
-            timer().endGpuSubTimer();
+            //timer().endGpuTimer();
 
-            timer().endGpuTimer();
-
-            if (validCount > 0) {
-                cudaMemcpy(odata, dev_out, validCount * sizeof(int), cudaMemcpyDeviceToHost);
-            }
-
-            cudaFree(dev_in);
             cudaFree(dev_flags);
             cudaFree(dev_indices);
-            cudaFree(dev_out);
 
             return validCount;
         }
 
-        void radixSort(int n, int* odata, const int* idata) {
-            int* dev_in, * dev_out, * dev_bits, * dev_scanned;
-            cudaMalloc(&dev_in, n * sizeof(int));
-            cudaMalloc(&dev_out, n * sizeof(int));
+        void radixSort(int n, PathSegment* dev_paths, PathSegment* dev_paths_tmp, ShadeableIntersection* dev_isects, ShadeableIntersection* dev_isects_tmp) {
+            int* dev_bits, * dev_scanned;
             cudaMalloc(&dev_bits, n * sizeof(int));
             cudaMalloc(&dev_scanned, n * sizeof(int));
 
-            cudaMemcpy(dev_in, idata, n * sizeof(int), cudaMemcpyHostToDevice);
-
             int gridSize = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
-            timer().startGpuTimer();
+            //timer().startGpuTimer();
 
             for (int bit = 0; bit < 32; bit++) {
-                kernExtractBit<<<gridSize, BLOCK_SIZE >>>(n, bit, dev_in, dev_bits);
+                kernExtractBit<<<gridSize, BLOCK_SIZE >>>(n, bit, (int*)(&(dev_isects->materialId)), dev_bits);
 
                 scanDevice(n, dev_scanned, dev_bits);
 
@@ -201,17 +203,13 @@ namespace StreamCompaction {
                 cudaMemcpy(&lastIsZero, dev_bits + (n - 1), sizeof(int), cudaMemcpyDeviceToHost);
                 const int totalZeros = lastScan + lastIsZero;
 
-                kernScatterByBit<<<gridSize, BLOCK_SIZE >>>(n, dev_in, dev_bits, dev_scanned, dev_out, totalZeros);
+                kernScatterByBit<<<gridSize, BLOCK_SIZE >>>(n, dev_bits, dev_scanned, dev_paths, dev_paths_tmp, dev_isects, dev_isects_tmp, totalZeros);
 
-                std::swap(dev_in, dev_out);
+                std::swap(dev_paths, dev_paths_tmp);
+                std::swap(dev_isects, dev_isects_tmp);
             }
 
-            timer().endGpuTimer();
-
-            cudaMemcpy(odata, dev_in, n * sizeof(int), cudaMemcpyDeviceToHost);
-
-            cudaFree(dev_in);
-            cudaFree(dev_out);
+            //timer().endGpuTimer();
             cudaFree(dev_bits);
             cudaFree(dev_scanned);
         }
