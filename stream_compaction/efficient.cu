@@ -83,15 +83,73 @@ namespace StreamCompaction {
             int i = blockIdx.x * blockDim.x + threadIdx.x;
             if (i >= n) return;
 
-            int f = flags[i];
-            int pos = f ? scanned[i] : (totalActives + (i - scanned[i]));
-
-            outPaths[pos] = inPaths[i];
+            if (flags[i] == 1) {
+                int pos = scanned[i];
+                outPaths[pos] = inPaths[i];
+            }
         }
 
+        __global__ void kernScanBlock(int n, int* odata, const int* idata, int* blockSums) {
+            __shared__ int temp[2 * BLOCK_SIZE];
 
+            int thid = threadIdx.x;
+            int tileBase = 2 * blockIdx.x * blockDim.x;
 
-        void scanDevice(int n, int* dev_out, const int* dev_in) {
+            int ai_s = 2 * thid;
+            int bi_s = ai_s + 1;
+
+            int ai_g = tileBase + ai_s;
+            int bi_g = ai_g + 1;
+
+            temp[ai_s] = (ai_g < n) ? idata[ai_g] : 0;
+            temp[bi_s] = (bi_g < n) ? idata[bi_g] : 0;
+
+            int offset = 1;
+            for (int d = BLOCK_SIZE; d > 0; d >>= 1) {
+                __syncthreads();
+                if (thid < d) {
+                    int ai = offset * (2 * thid + 1) - 1;
+                    int bi = offset * (2 * thid + 2) - 1;
+                    temp[bi] += temp[ai];
+                }
+                offset <<= 1;
+            }
+
+            __syncthreads();
+
+            if (thid == 0) {
+                blockSums[blockIdx.x] = temp[2 * BLOCK_SIZE - 1];
+                temp[2 * BLOCK_SIZE - 1] = 0;
+            }
+            __syncthreads();
+
+            for (int d = 1; d <= BLOCK_SIZE; d <<= 1) {
+                offset >>= 1;
+                __syncthreads();
+                if (thid < d) {
+                    int ai = offset * (2 * thid + 1) - 1;
+                    int bi = offset * (2 * thid + 2) - 1;
+                    int t = temp[ai];
+                    temp[ai] = temp[bi];
+                    temp[bi] += t;
+                }
+            }
+            __syncthreads();
+
+            if (ai_g < n) odata[ai_g] = temp[ai_s];
+            if (bi_g < n) odata[bi_g] = temp[bi_s];
+        }
+
+        __global__ void kernAddBlockSums(int n, int* data, const int* blockSumsScanned) {
+            int blockOffset = blockSumsScanned[blockIdx.x];
+            int ai = 2 * blockIdx.x * blockDim.x + threadIdx.x;
+            int bi = ai + blockDim.x;
+
+            if (ai < n) data[ai] += blockOffset;
+            if (bi < n) data[bi] += blockOffset;
+        }
+
+        void scanDevice(int n, int* dev_out, const int* dev_in) { 
             int log2n = ilog2ceil(n);
             int m = 1 << log2n;
 
@@ -103,24 +161,47 @@ namespace StreamCompaction {
             if (m > n) {
                 cudaMemset(dev_buf + n, 0, (m - n) * sizeof(int));
             }
-
+            
             for (int d = 0; d < log2n; d++) {
                 int numWorkItems = m >> (d + 1);
                 int blocks = (numWorkItems + BLOCK_SIZE - 1) / BLOCK_SIZE;
                 kernUpsweep<<<blocks, BLOCK_SIZE >>>(d, m, dev_buf);
             }
-
+            
             cudaMemset(dev_buf + (m - 1), 0, sizeof(int));
-
+            
             for (int d = log2n - 1; d >= 0; d--) {
                 int numWorkItems = m >> (d + 1);
                 int blocks = (numWorkItems + BLOCK_SIZE - 1) / BLOCK_SIZE;
                 kernDownsweep<<<blocks, BLOCK_SIZE >>>(d, m, dev_buf);
             }
-
+            
             cudaMemcpy(dev_out, dev_buf, n * sizeof(int), cudaMemcpyDeviceToDevice);
-
+            
             cudaFree(dev_buf);
+        }
+
+        void scanDeviceShared(int n, int* dev_out, const int* dev_in) {
+            int threadsPerBlock = BLOCK_SIZE;
+            int elementsPerBlock = 2 * threadsPerBlock;
+            int numBlocks = (n + elementsPerBlock - 1) / elementsPerBlock;
+
+            int* dev_blockSums;
+            cudaMalloc(&dev_blockSums, numBlocks * sizeof(int));
+
+            kernScanBlock << <numBlocks, threadsPerBlock >> > (n, dev_out, dev_in, dev_blockSums);
+
+            if (numBlocks > 1) {
+                int* dev_blockSumsScanned;
+                cudaMalloc(&dev_blockSumsScanned, numBlocks * sizeof(int));
+                scanDevice(numBlocks, dev_blockSumsScanned, dev_blockSums);
+
+                kernAddBlockSums << <numBlocks, threadsPerBlock >> > (n, dev_out, dev_blockSumsScanned);
+
+                cudaFree(dev_blockSumsScanned);
+            }
+
+            cudaFree(dev_blockSums);
         }
 
         /**
@@ -166,7 +247,7 @@ namespace StreamCompaction {
             StreamCompaction::Common::kernMapToBoolean<<<gridSize, BLOCK_SIZE >>>(n, dev_flags, dev_in);
             cudaDeviceSynchronize();
 
-            scanDevice(n, dev_indices, dev_flags);
+            scanDeviceShared(n, dev_indices, dev_flags);
             cudaDeviceSynchronize();
 
             int lastScan, lastFlag;
@@ -196,7 +277,7 @@ namespace StreamCompaction {
             for (int bit = 0; bit < 32; bit++) {
                 kernExtractBit<<<gridSize, BLOCK_SIZE >>>(n, bit, (int*)(&(dev_isects->materialId)), dev_bits);
 
-                scanDevice(n, dev_scanned, dev_bits);
+                scanDeviceShared(n, dev_scanned, dev_bits);
 
                 int lastScan = 0, lastIsZero = 0;
                 cudaMemcpy(&lastScan, dev_scanned + (n - 1), sizeof(int), cudaMemcpyDeviceToHost);
