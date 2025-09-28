@@ -57,6 +57,8 @@ struct Camera
     glm::vec3 right;
     glm::vec2 fov;
     glm::vec2 pixelLength;
+    float lensRadius;
+    float focalDistance;
 };
 
 struct RenderState
@@ -74,6 +76,11 @@ struct PathSegment
     glm::vec3 color;
     int pixelIndex;
     int remainingBounces;
+    bool isShadowRay;
+    float shadowDist2;
+    glm::vec3 lightContrib;
+    float lastBsdfPdf;
+    bool  lastWasSpecular;
 };
 
 // Use with a corresponding PathSegment to do:
@@ -84,4 +91,5 @@ struct ShadeableIntersection
   float t;
   glm::vec3 surfaceNormal;
   int materialId;
+  int geomId;
 };

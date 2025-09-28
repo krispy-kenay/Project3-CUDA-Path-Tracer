@@ -59,6 +59,10 @@ __host__ __device__ void scatterRay(
     pathSegment.ray.origin = intersect + 0.001f * normal;
     pathSegment.ray.direction = glm::normalize(newDirection);
 
+    float cosTheta = glm::max(0.f, glm::dot(normal, pathSegment.ray.direction));
+    pathSegment.lastBsdfPdf = cosTheta > 0.f ? (cosTheta / PI) : 0.f;
+    pathSegment.lastWasSpecular = false;
+
     pathSegment.color *= m.color;
     pathSegment.remainingBounces--;
 }

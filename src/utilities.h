@@ -18,10 +18,15 @@
 class GuiDataContainer
 {
 public:
-    GuiDataContainer() : TracedDepth(0), antiAliasing(false), StratifiedSampling(false), Strata(4), MaxSPP(1024) {}
+    GuiDataContainer() : TracedDepth(0), antiAliasing(false), StratifiedSampling(false), SortMaterial(false), RussianRoulette(false), DirectLighting(false), ShowBSDFContrib(true), ShowShadowContrib(true), Strata(4), MaxSPP(1024) {}
     int TracedDepth;
     bool antiAliasing;
     bool StratifiedSampling;
+    bool SortMaterial;
+    bool RussianRoulette;
+    bool DirectLighting;
+    bool ShowBSDFContrib;
+    bool ShowShadowContrib;
     int Strata;
     int MaxSPP;
 };

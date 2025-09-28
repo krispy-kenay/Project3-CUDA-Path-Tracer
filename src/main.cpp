@@ -287,6 +287,11 @@ void RenderImGui()
     //    counter++;
     //ImGui::SameLine();
     //ImGui::Text("counter = %d", counter);
+    
+    ImGui::Text("Traced Depth %d", imguiData->TracedDepth);
+    ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
+
+    ImGui::Text("--- Sampling & Camera ---");
     const char* sppOptions[] = { "2", "4", "8", "16", "32", "64", "128", "256", "512", "1024" };
     static int current = 9;
 
@@ -296,8 +301,7 @@ void RenderImGui()
         iteration = 0;
         camchanged = true;
     }
-    ImGui::Text("Traced Depth %d", imguiData->TracedDepth);
-    ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
+
     bool prevAA = guiData->antiAliasing;
     if (ImGui::Checkbox("Enable Antialiasing", &guiData->antiAliasing)) {
         iteration = 0;
@@ -315,6 +319,53 @@ void RenderImGui()
                 camchanged = true;
             }
         }
+    }
+    static const char* apertureOptions[] = {"pinhole", "f/1.4", "f/2.0", "f/2.8", "f/4.0","f/5.6", "f/8.0", "f/11", "f/16"};
+    static int currentAperture = 0;
+    if (ImGui::Combo("Aperture", &currentAperture, apertureOptions, IM_ARRAYSIZE(apertureOptions))) {
+        if (currentAperture == 0) {
+            renderState->camera.lensRadius = 0.0f;
+        }
+        else {
+            float fStops[] = { 1.4f, 2.0f, 2.8f, 4.0f, 5.6f, 8.0f, 11.0f, 16.0f };
+            float fStop = fStops[currentAperture - 1];
+            renderState->camera.lensRadius = renderState->camera.focalDistance / (2.0f * fStop);
+        }
+        iteration = 0;
+        camchanged = true;
+    }
+    if (currentAperture != 0) {
+        if (ImGui::SliderFloat("Focal Distance", &renderState->camera.focalDistance, 0.1f, 100.f)) {
+            iteration = 0;
+            camchanged = true;
+        }
+    }
+    
+
+    ImGui::Text("--- Shading ---");
+    if (ImGui::Checkbox("Enable Direct Lighting", &guiData->DirectLighting)) {
+        iteration = 0;
+        camchanged = true;
+    }
+    if (guiData->DirectLighting) {
+        if (ImGui::Checkbox("Show BSDF Bounce Contribution", &guiData->ShowBSDFContrib)) {
+            iteration = 0;
+            camchanged = true;
+        }
+        if (ImGui::Checkbox("Show Shadow Ray Contribution", &guiData->ShowShadowContrib)) {
+            iteration = 0;
+            camchanged = true;
+        }
+    }
+    if (ImGui::Checkbox("Enable Material Sorting", &guiData->SortMaterial)) {
+        iteration = 0;
+        camchanged = true;
+    }
+
+    ImGui::Text("--- Path Termination ---");
+    if (ImGui::Checkbox("Enable Russian Roulette", &guiData->RussianRoulette)) {
+        iteration = 0;
+        camchanged = true;
     }
     ImGui::End();
 
