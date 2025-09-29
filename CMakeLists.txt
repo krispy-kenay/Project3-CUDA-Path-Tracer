@@ -47,6 +47,8 @@ endif(UNIX)
 set(GLM_ROOT_DIR "${CMAKE_SOURCE_DIR}/external")
 find_package(GLM REQUIRED)
 include_directories(${GLM_INCLUDE_DIRS})
+include_directories(${CMAKE_SOURCE_DIR}/external/tinyobjloader)
+
 
 set(headers
     src/image.h
@@ -57,6 +59,7 @@ set(headers
     src/scene.h
     src/sceneStructs.h
     src/utilities.h
+    src/helpers.h
 )
 
 set(sources
@@ -108,7 +111,15 @@ add_subdirectory(stream_compaction)  # TODO: uncomment if using your stream comp
 
 add_executable(${CMAKE_PROJECT_NAME} ${sources} ${headers} ${imgui_sources} ${imgui_headers})
 
-target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.0/include")
+find_package(CUDAToolkit REQUIRED)
+
+target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+target_link_libraries(${CMAKE_PROJECT_NAME}
+    ${CUDAToolkit_LIBRARIES}
+    ${GL_LIBRARIES}
+    stream_compaction
+)
+
 target_link_libraries(${CMAKE_PROJECT_NAME}
     ${GL_LIBRARIES}
     stream_compaction  # TODO: uncomment if using your stream compaction

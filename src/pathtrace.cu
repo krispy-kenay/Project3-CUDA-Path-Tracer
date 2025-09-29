@@ -19,7 +19,7 @@
 
 #define ERRORCHECK 1
 #define RR_THRESHOLD 5
-#define SHADOW_RAYS 2
+#define SHADOW_RAYS 1
 
 #define FILENAME (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
 #define checkCUDAError(msg) checkCUDAErrorFn(msg, FILENAME, __LINE__)
@@ -186,7 +186,7 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
     int x = (blockIdx.x * blockDim.x) + threadIdx.x;
     int y = (blockIdx.y * blockDim.y) + threadIdx.y;
 
-    int lensRadius = 0;
+    bool sobolSampling = true;
 
     if (x < cam.resolution.x && y < cam.resolution.y) {
         int index = x + (y * cam.resolution.x);
@@ -202,6 +202,11 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
             thrust::default_random_engine rng = makeSeededRandomEngine(iter, index, 0);
             thrust::uniform_real_distribution<float> u01(0, 1);
 
+            // "Dumb" sampling
+            jitterX = u01(rng);
+            jitterY = u01(rng);
+
+            // Stratified sampling
             if (stratifiedSampling) {
                 int sx, sy;
                 stratum_from_iter(iter, sx, sy, strata);
@@ -213,9 +218,19 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
                 jitterX = jx;
                 jitterY = jy;
             }
-            else {
-                jitterX = u01(rng);
-                jitterY = u01(rng);
+            
+            if (sobolSampling) {
+                uint32_t s0 = scramble_mask(iter, index, 0);
+                uint32_t s1 = scramble_mask(iter, index, 1);
+
+                float u = sobol_scrambled((uint32_t)iter, 0, s0);
+                float v = sobol_scrambled((uint32_t)iter, 1, s1);
+
+                float sx = uint_to_unit_float(seed_hash(index, 17, 0));
+                float sy = uint_to_unit_float(seed_hash(index, 29, 0));
+
+                jitterX = cp_rotate(u, sx);
+                jitterY = cp_rotate(v, sy);
             }
         }
 
@@ -230,9 +245,34 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
         segment.ray.direction = direction;
 
         if (cam.lensRadius > 0) {
-            thrust::default_random_engine rng = makeSeededRandomEngine(iter, index, 0);
-            glm::vec2 lensSample = concentricSampleDisk(rng) * cam.lensRadius;
-            glm::vec3 lensPoint = cam.position + lensSample.x * cam.right + lensSample.y * cam.up;
+            glm::vec2 lensSample;
+            glm::vec3 lensPoint;
+            if (sobolSampling) {
+                uint32_t s2 = scramble_mask(iter, index, 2);
+                uint32_t s3 = scramble_mask(iter, index, 3);
+                float u = sobol_scrambled((uint32_t)iter, 2, s2);
+                float v = sobol_scrambled((uint32_t)iter, 3, s3);
+                float sx = 2.0f * u - 1.0f;
+                float sy = 2.0f * v - 1.0f;
+                float r, theta;
+                if (sx == 0 && sy == 0) {
+                    r = 0.0f; theta = 0.0f;
+                }
+                else {
+                    float ax = fabsf(sx), ay = fabsf(sy);
+                    if (ax > ay) { r = ax; theta = (PI / 4.0f) * (sy / sx); }
+                    else { r = ay; theta = (PI / 2.0f) - (PI / 4.0f) * (sx / sy); }
+                }
+                float dx = r * cosf(theta);
+                float dy = r * sinf(theta);
+                lensSample = glm::vec2(dx, dy) * cam.lensRadius;
+                lensPoint = cam.position + lensSample.x * cam.right + lensSample.y * cam.up;
+            }
+            else {
+                thrust::default_random_engine rng = makeSeededRandomEngine(iter, index, 0);
+                lensSample = concentricSampleDisk(rng) * cam.lensRadius;
+                lensPoint = cam.position + lensSample.x * cam.right + lensSample.y * cam.up;
+            }
             float ft = cam.focalDistance / glm::dot(direction, cam.view);
             glm::vec3 focalPoint = cam.position + direction * ft;
             segment.ray.origin = lensPoint;
@@ -290,6 +330,9 @@ __global__ void computeIntersections(
             else if (geom.type == SPHERE)
             {
                 t = sphereIntersectionTest(geom, pathSegment.ray, tmp_intersect, tmp_normal, outside);
+            }
+            else if (geom.type == TRIANGLE) {
+                t = triangleIntersectionTest(geom, pathSegment.ray, tmp_intersect, tmp_normal, outside);
             }
             // TODO: add more intersection tests here... triangle? metaball? CSG?
 
@@ -419,7 +462,7 @@ __global__ void shadeRealMaterial(
     glm::vec3 intersectPoint = getPointOnRay(pathSegment.ray, intersection.t);
     glm::vec3 normal = glm::normalize(intersection.surfaceNormal);
 
-    if (material.emittance > 0.0f && numLights > 0) {
+    if (material.emittance > 0.0f) {
         if (directLighting && !showBSDFContrib) {
             pathSegment.remainingBounces = 0;
             return;
@@ -473,20 +516,24 @@ __global__ void shadeRealMaterial(
     }
 
     if (directLighting && showShadowContrib && numLights > 0 && material.emittance == 0.0f) {
-        thrust::default_random_engine rng = makeSeededRandomEngine(iter, idx, pathSegment.remainingBounces);
+        XRNG xr(seed_hash(iter, idx, pathSegment.remainingBounces));
 
         glm::vec3 wo = -pathSegment.ray.direction;
         glm::vec3 n = glm::normalize(normal);
         if (glm::dot(n, wo) < 0.f) n = -n;
 
         for (int k = 0; k < num_shadow_rays; ++k) {
-            thrust::uniform_real_distribution<float> u01(0, 1);
-            int lightIndex = (int)(u01(rng) * numLights);
+            int lightIndex = (int)floorf(xr.next() * numLights);
+            lightIndex = max(0, min(numLights - 1, lightIndex));
+
             Geom light = lights[lightIndex];
             Material lightMat = materials[light.materialid];
 
             glm::vec3 lightPoint, lightNormal;
-            samplePointOnLight(light, rng, lightPoint, lightNormal);
+            float u0 = xr.next();
+            float u1 = xr.next();
+            float u2 = xr.next();
+            samplePointOnLight(light, u0, u1, u2, lightPoint, lightNormal);
 
             glm::vec3 toLight = lightPoint - intersectPoint;
             float dist2 = glm::dot(toLight, toLight);
@@ -531,13 +578,14 @@ __global__ void shadeRealMaterial(
         }
     }
 
-    thrust::default_random_engine rng2 = makeSeededRandomEngine(iter, idx, pathSegment.remainingBounces);
+    XRNG rng2(seed_hash(iter, idx, pathSegment.remainingBounces));
     scatterRay(pathSegment, intersectPoint, normal, material, rng2);
 
     if (russianRoulette && pathSegment.remainingBounces > RR_THRESHOLD) {
-        thrust::uniform_real_distribution<float> u01(0, 1);
+        //thrust::uniform_real_distribution<float> u01(0, 1);
+        XRNG rr(seed_hash(iter, idx, 123 + pathSegment.remainingBounces));
         float p = glm::clamp(glm::max(pathSegment.color.r, glm::max(pathSegment.color.g, pathSegment.color.b)), 0.1f, 1.0f);
-        if (u01(rng2) > p) {
+        if (rr.next() > p) {
             pathSegment.remainingBounces = 0;
         }
         else {
