@@ -60,6 +60,8 @@ set(headers
     src/sceneStructs.h
     src/utilities.h
     src/helpers.h
+    src/shaders.h
+    src/bvh.h
 )
 
 set(sources
@@ -72,6 +74,8 @@ set(sources
     src/interactions.cu
     src/scene.cpp
     src/utilities.cpp
+    src/shaders.cu
+    src/bvh.cu
 )
 
 set(imgui_headers
