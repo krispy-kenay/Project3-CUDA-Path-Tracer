@@ -7,10 +7,32 @@
 Project 3 CUDA Path Tracer
 ====================
 
+## Basic Features
 
+### Diffuse BSDF
+
+<br><br>
+
+---
+
+### Stream Compaction
+
+This path tracer implements stream compaction which moves active rays to the front of the array and dead rays to the back, allowing later kernel launches to process only the active rays rather than the full array.
+
+---
+<br><br>
+
+### Material Sorting
+
+---
+<br><br>
+
+### Anti-Aliasing
+
+---
+<br><br>
 
 ## Visual Features
-
 
 ### Specular and Refractive Materials
 
@@ -64,9 +86,8 @@ This can be counteracted by sorting the rays by material type before shading or 
 
 Implementing glossy and rough specular materials would greatly enhance the variety of scenes that can be represented, though it would also introduce additional calculations and branching that could negatively impact performance
 
-<br><br>
-
 ---
+<br><br>
 
 ### Sampling Methods
 
@@ -105,15 +126,14 @@ Both sampling methods work well on GPU. The sampling computation is uniform acro
 
 Adaptive sampling which concentrates samples in high-variance regions or other spatially aware sampling methods would likely much more explicitly lower variance faster than Sobol sampling.
 
+---
 <br><br>
 
----
-
-## Depth of Field
+### Depth of Field
 
 This path tracer implements various real world camera properties like f-stop, focal length and focal distance to simulate depth of field (colloquially known as bokeh effect).
 
-### Implementation
+#### Implementation
 
 Each camera ray originates from a randomly sampled point on a circular aperture rather than a single pinhole.
 The code first computes the standard pinhole ray direction, then calculates where this ray intersects the focal plane.
@@ -137,6 +157,29 @@ Every ray undergoes identical lens sampling calculations with no branching, whic
 
 More sophisticated lens models (thick lens simulation or realistic optical systems) could enhance realism, but would incur slightly increased computational cost.
 
+---
 <br><br>
 
+## Mesh Improvements
+
+### OBJ File Loading
+
 ---
+<br><br>
+
+## Performance Features
+
+### Russian Roulette
+
+---
+<br><br>
+
+### Hierarchical Spatial Data Structure
+
+---
+<br><br>
+
+### Wavefront Path Tracing
+
+---
+<br><br>
