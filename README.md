@@ -19,6 +19,49 @@ Project 3 CUDA Path Tracer
 
 This path tracer implements stream compaction which moves active rays to the front of the array and dead rays to the back, allowing later kernel launches to process only the active rays rather than the full array.
 
+#### Implementation
+
+The compaction is done in three steps.
+1. Map rays to boolean flags (1 for alive, 0 for dead).
+2. Perform an exclusive scan on the flags to compute output indices.
+3. Scatter rays to their final positions.
+The scan is implemented using Blelloch's work-efficient algorithm with shared memory optimizations.
+Each block processes a tile of elements entirely in shared memory and computes partial sums that get recursively scanned if multiple blocks are needed.
+
+#### Performance
+
+The graph below shows how the number of active rays evolves with bounce depth when compaction is enabled. The ray count decreases somewhat linearly from 522,868 to just 139,503 before reaching zero at the last bounce. 
+This happens because rays miss geometry or are terminated early (with Russian Roulette for example, which was not enabled for this). The idea is that by compacting the ray array after each bounce, only the surviving rays are processed in the next iteration which allows for smaller kernel launches and ideally a faster total execution times.
+
+![Rays Alive after Compaction](img/active_rays_compactioni.png)
+<br>
+<sub>*Number of active rays in the array after compaction during the very first iteration*</sub>
+
+The graph below shows the execution time of individual kernels with and without compaction across all bounce depths.
+Without compaction, each kernel processes the full array of 640,000 rays resulting in consistent intersect and shade times that hover around 0.6 to 1.3 ms per bounce.
+Since the ray count remains fixed, there's no need for compaction, and the total frame time settles at a lean 14.157 ms.
+
+With compaction enabled the intersect and shade kernels do benefit from reduced ray counts. For example, intersect time drops from 0.6765 ms at depth 1 to just 0.3553 ms at depth 8, and shade time falls from 0.6809 ms to 0.2920 ms over the same range.
+However, these savings are completely overshadowed by the cost of the compaction step itself, which adds between 0.9 and 3.3 ms per bounce. At depth 5, for instance, compaction takes 3.2678 ms—more than five times the combined cost of intersect and shade at that depth. 
+This overhead accumulates quickly, leading to the total frame time ballooning to 21.279 ms which is around 60% slower than the uncompacted baseline.
+
+![Rays Alive after Compaction](img/compaction_subtiming.png)
+<br>
+<sub>*Time in ms for the different kernels in the main loop with and without compaction during the very first iteration*</sub>
+
+While this version uses shared memory, testing against the non-shared memory version makes the situation even worse. The total frame time spikes to 23.372 ms, as the kernel time for compaction almost doubles.
+Thus both work-efficient stream compaction implementations (adapted from Project 2) do not offer a substantial benefit here.
+
+#### GPU vs CPU
+
+Parallel scan and scattering are operations that can be parallelized and with proper implementation (like `thrust` does) run super fast. While modern CPUs can keep up for smaller arrays, the sequential nature of CPUs tends to favor GPUs for larger arrays.
+
+#### Further Optimizations
+
+The current implementation allocates temporary buffers for flags and indices on every compaction call. Reusing pre-allocated buffers would reduce overhead.
+More importantly however, compaction becomes unnecessary with the wavefront architecture (see below), which naturally achieves compaction through its queue-based design.
+Therefore the conclusion in this project was, that time would be better spent on another optimization that eliminates the need for compaction altogether while at the same time improving coherence between threads!
+
 ---
 <br>
 
