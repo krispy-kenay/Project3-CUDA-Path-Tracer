@@ -67,6 +67,7 @@ struct Camera
     glm::vec2 pixelLength;
     float lensRadius;
     float focalDistance;
+    int focalLength;
 };
 
 struct RenderState
@@ -100,4 +101,14 @@ struct ShadeableIntersection
   glm::vec3 surfaceNormal;
   int materialId;
   int geomId;
+};
+
+struct BVHNode {
+    glm::vec3 bmin;
+    glm::vec3 bmax;
+    unsigned int left;
+    unsigned int right;
+    unsigned int parent;
+    unsigned int isLeaf;
+    unsigned int geomIndex;
 };
