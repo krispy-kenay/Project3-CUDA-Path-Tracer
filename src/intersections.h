@@ -79,3 +79,38 @@ __device__ float triangleIntersectionTest(
     glm::vec3& intersectionPoint,
     glm::vec3& normal,
     bool& outside);
+
+__global__ void computeIntersectionsNaive(int numRays, PathSegment* rayQueue, Geom* geoms, int geoms_size, ShadeableIntersection* intersectionQueue);
+__global__ void computeIntersectionsBVH(int numRays, PathSegment* rayQueue, Geom* geoms, int geoms_size, ShadeableIntersection* intersectionQueue, BVHNode* dev_bvhNodes, int bvhRootIndex);
+__global__ void dispatchQueue(int num_paths,
+    PathSegment* dev_queue_rays,
+    ShadeableIntersection* dev_queue_isect,
+    Material* materials,
+    PathSegment* dev_queue_rays_emissive,
+    ShadeableIntersection* dev_queue_isect_emissive,
+    PathSegment* dev_queue_rays_diffuse,
+    ShadeableIntersection* dev_queue_isect_diffuse,
+    PathSegment* dev_queue_rays_specular,
+    ShadeableIntersection* dev_queue_isect_specular,
+    PathSegment* dev_queue_rays_refractive,
+    ShadeableIntersection* dev_queue_isect_refractive,
+    bool use_shadow_rays,
+    int num_shadow_rays,
+    PathSegment* dev_queue_rays_shadow,
+    ShadeableIntersection* dev_queue_isect_shadow,
+    PathSegment* dev_queue_rays_shadow_setup,
+    ShadeableIntersection* dev_queue_isect_shadow_setup,
+    int* queueSizes);
+__global__ void consolidatePaths(
+    PathSegment* output,
+    PathSegment* emissive,
+    PathSegment* refractive,
+    PathSegment* specular,
+    PathSegment* diffuse,
+    PathSegment* shadow,
+    int emissiveCount,
+    int refractiveCount,
+    int specularCount,
+    int diffuseCount,
+    int shadowCount,
+    int* outputCount);

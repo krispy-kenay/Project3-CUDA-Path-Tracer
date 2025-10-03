@@ -1,4 +1,5 @@
 #include "intersections.h"
+#include "bvh.h"
 
 __host__ __device__ float boxIntersectionTest(
     Geom box,
@@ -156,4 +157,265 @@ __device__ float triangleIntersectionTest(
     outside = glm::dot(r.direction, normal) < 0.f;
 
     return glm::length(r.origin - intersectionPoint);
+}
+
+__global__ void computeIntersectionsNaive(int numRays, PathSegment* rayQueue, Geom* geoms, int geoms_size, ShadeableIntersection* intersectionQueue) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numRays) return;
+
+    PathSegment& ray = rayQueue[idx];
+    if (ray.remainingBounces <= 0) return;
+    ShadeableIntersection intersection;
+    intersection.t = -1.0f;
+    intersection.materialId = -1;
+    intersection.geomId = -1;
+
+    float t_min = FLT_MAX;
+    glm::vec3 intersect;
+    glm::vec3 normal;
+    glm::vec3 tmp_intersect;
+    glm::vec3 tmp_normal;
+    
+    int hitGeomId = -1;
+    int hitMatId = -1;
+    bool outside = true;
+
+    for (int i = 0; i < geoms_size; i++) {
+        float t = -1.0f;
+
+        if (geoms[i].type == SPHERE) {
+            t = sphereIntersectionTest(geoms[i], ray.ray, tmp_intersect, tmp_normal, outside);
+        }
+        else if (geoms[i].type == CUBE) {
+            t = boxIntersectionTest(geoms[i], ray.ray, tmp_intersect, tmp_normal, outside);
+        }
+        else if (geoms[i].type == TRIANGLE) {
+            t = triangleIntersectionTest(geoms[i], ray.ray, tmp_intersect, tmp_normal, outside);
+        }
+
+        if (t > 0.0f && t < t_min) {
+            t_min = t;
+            hitGeomId = i;
+            hitMatId = geoms[hitGeomId].materialid;
+            normal = tmp_normal;
+            intersect = tmp_intersect;
+        }
+    }
+
+    if (hitGeomId != -1) {
+        intersection.t = t_min;
+        intersection.materialId = hitMatId;
+        intersection.surfaceNormal = normal;
+        intersection.geomId = hitGeomId;
+    }
+
+    intersectionQueue[idx] = intersection;
+}
+
+__global__ void computeIntersectionsBVH(int numRays, PathSegment* rayQueue, Geom* geoms, int geoms_size, ShadeableIntersection* intersectionQueue, BVHNode* dev_bvhNodes, int bvhRootIndex) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= numRays) return;
+    if (bvhRootIndex < 0) return;
+
+    PathSegment& ray = rayQueue[idx];
+
+    ShadeableIntersection intersection;
+    intersection.t = -1.0f;
+    intersection.materialId = -1;
+    intersection.geomId = -1;
+
+    float t_min = FLT_MAX;
+    glm::vec3 intersect;
+    glm::vec3 normal;
+    
+    int hitGeomId = -1;
+    int hitMatId = -1;
+
+    int stack[64];
+    int sp = 0;
+    stack[sp++] = bvhRootIndex;
+
+    while (sp) {
+        int nodeIdx = stack[--sp];
+        const BVHNode& node = dev_bvhNodes[nodeIdx];
+
+        if (!rayAABB(ray.ray, node.bmin, node.bmax, t_min)) continue;
+        if (node.isLeaf) {
+            int i = (int)node.geomIndex;
+            float t;
+            glm::vec3 tmp_intersect;
+            glm::vec3 tmp_normal;
+            bool outside;
+
+            const Geom& g = geoms[i];
+            if (g.type == SPHERE) {
+                t = sphereIntersectionTest(geoms[i], ray.ray, tmp_intersect, tmp_normal, outside);
+            }
+            else if (g.type == CUBE) {
+                t = boxIntersectionTest(geoms[i], ray.ray, tmp_intersect, tmp_normal, outside);
+            }
+            else if (g.type == TRIANGLE) {
+                t = triangleIntersectionTest(geoms[i], ray.ray, tmp_intersect, tmp_normal, outside);
+            }
+
+            if (t > 0.f && t < t_min) {
+                t_min = t;
+                hitGeomId = i;
+                hitMatId = geoms[hitGeomId].materialid;
+                normal = tmp_normal;
+                intersect = tmp_intersect;
+            }
+        }
+        else {
+            stack[sp++] = (int)node.left;
+            stack[sp++] = (int)node.right;
+        }
+    }
+
+    if (hitGeomId != -1) {
+        intersection.t = t_min;
+        intersection.materialId = hitMatId;
+        intersection.surfaceNormal = normal;
+        intersection.geomId = hitGeomId;
+    }
+
+    intersectionQueue[idx] = intersection;
+}
+
+__global__ void dispatchQueue(int num_paths,
+    PathSegment* dev_queue_rays,
+    ShadeableIntersection* dev_queue_isect,
+    Material* materials,
+    PathSegment* dev_queue_rays_emissive,
+    ShadeableIntersection* dev_queue_isect_emissive,
+    PathSegment* dev_queue_rays_diffuse,
+    ShadeableIntersection* dev_queue_isect_diffuse,
+    PathSegment* dev_queue_rays_specular,
+    ShadeableIntersection* dev_queue_isect_specular,
+    PathSegment* dev_queue_rays_refractive,
+    ShadeableIntersection* dev_queue_isect_refractive,
+    bool use_shadow_rays,
+    int num_shadow_rays,
+    PathSegment* dev_queue_rays_shadow,
+    ShadeableIntersection* dev_queue_isect_shadow,
+    PathSegment* dev_queue_rays_shadow_setup,
+    ShadeableIntersection* dev_queue_isect_shadow_setup,
+    int* queueSizes)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= num_paths) return;
+
+    PathSegment ps = dev_queue_rays[idx];
+    if (ps.remainingBounces <= 0) return;
+    ShadeableIntersection isect = dev_queue_isect[idx];
+
+    if (isect.t < 0.0f) {
+        return;
+    }
+
+    Material mat = materials[isect.materialId];
+    if (ps.isShadowRay) {
+        int pos = atomicAdd(&queueSizes[4], 1);
+        dev_queue_rays_shadow[pos] = ps;
+        dev_queue_isect_shadow[pos] = isect;
+        return;
+    }
+
+    if (mat.emittance > 0.0f) {
+        int pos = atomicAdd(&queueSizes[0], 1);
+        dev_queue_rays_emissive[pos] = ps;
+        dev_queue_isect_emissive[pos] = isect;
+        return;
+    }
+
+    if (mat.hasRefractive > 0.5f) {
+        int pos = atomicAdd(&queueSizes[1], 1);
+        dev_queue_rays_refractive[pos] = ps;
+        dev_queue_isect_refractive[pos] = isect;
+        return;
+    }
+
+    if (mat.hasReflective > 0.5f) {
+        int pos = atomicAdd(&queueSizes[2], 1);
+        dev_queue_rays_specular[pos] = ps;
+        dev_queue_isect_specular[pos] = isect;
+        return;
+    }
+
+    int pos = atomicAdd(&queueSizes[3], 1);
+    dev_queue_rays_diffuse[pos] = ps;
+    dev_queue_isect_diffuse[pos] = isect;
+
+    if (!use_shadow_rays) return;
+    int posShadow = atomicAdd(&queueSizes[5], num_shadow_rays);
+    for (int i = 0; i < num_shadow_rays; i++) {
+        dev_queue_rays_shadow_setup[posShadow + i] = ps;
+        dev_queue_isect_shadow_setup[posShadow + i] = isect;
+    }
+}
+
+__global__ void consolidatePaths(
+    PathSegment* output,
+    PathSegment* emissive,
+    PathSegment* refractive,
+    PathSegment* specular,
+    PathSegment* diffuse,
+    PathSegment* shadow,
+    int emissiveCount,
+    int refractiveCount,
+    int specularCount,
+    int diffuseCount,
+    int shadowCount,
+    int* outputCount)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx < emissiveCount) {
+        PathSegment ps = emissive[idx];
+        if (ps.remainingBounces > 0) {
+            int pos = atomicAdd(outputCount, 1);
+            output[pos] = ps;
+        }
+        return;
+    }
+
+    int refractiveIdx = idx - emissiveCount;
+    if (refractiveIdx >= 0 && refractiveIdx < refractiveCount) {
+        PathSegment ps = refractive[refractiveIdx];
+        if (ps.remainingBounces > 0) {
+            int pos = atomicAdd(outputCount, 1);
+            output[pos] = ps;
+        }
+        return;
+    }
+
+    int specularIdx = refractiveIdx - refractiveCount;
+    if (specularIdx >= 0 && specularIdx < specularCount) {
+        PathSegment ps = specular[specularIdx];
+        if (ps.remainingBounces > 0) {
+            int pos = atomicAdd(outputCount, 1);
+            output[pos] = ps;
+        }
+        return;
+    }
+
+    int diffuseIdx = specularIdx - specularCount;
+    if (diffuseIdx >= 0 && diffuseIdx < diffuseCount) {
+        PathSegment ps = diffuse[diffuseIdx];
+        if (ps.remainingBounces > 0) {
+            int pos = atomicAdd(outputCount, 1);
+            output[pos] = ps;
+        }
+        return;
+    }
+
+    int shadowIdx = diffuseIdx - diffuseCount;
+    if (shadowIdx >= 0 && shadowIdx < shadowCount) {
+        PathSegment ps = shadow[shadowIdx];
+        if (ps.remainingBounces > 0) {
+            int pos = atomicAdd(outputCount, 1);
+            output[pos] = ps;
+        }
+        return;
+    }
 }
