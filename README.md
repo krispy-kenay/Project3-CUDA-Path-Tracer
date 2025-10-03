@@ -199,6 +199,56 @@ Every ray undergoes identical lens sampling calculations with no branching, whic
 
 More sophisticated lens models (thick lens simulation or realistic optical systems) could enhance realism, but would incur slightly increased computational cost.
 
+### Direct Lighting
+
+Direct lighting with next event estimation (NEE) dramatically accelerates convergence by explicitly sampling light sources at each diffuse surface interaction rather than relying solely on random path connections to find lights.
+
+| No Direct Lighting (at 64spp) | Direct Lighting (at 64spp) |
+| --- | --- |
+| ![No NEE at 64spp](img/intermed_64spp_simple.png) | ![DOF f8](img/intermed_64spp_nee.png) |
+
+#### Implementation
+
+At each diffuse ray bounce, the shader generates one or more shadow rays toward randomly sampled points on light sources.
+These shadow rays test visibility between the surface and the light, accumulating direct illumination contributions when unoccluded.
+The implementation uses multiple importance sampling (MIS) with the balance heuristic to weight contributions from both BSDF sampling and light sampling.
+For each light sample, the code computes the probability of generating that same path via BSDF sampling, then uses the squared PDFs to calculate MIS weights which should reduce variance in cases where either strategy alone doesn't perform well.
+Shadow rays are stored in a separate array and processed through the same intersection kernel as camera rays but in a separate step. After intersection testing, a final accumulation kernel checks whether each shadow ray reached the light and adds the weighted contribution to the pixel.
+
+One edge case shows up where the ceiling light geometry causes some light to leak through walls at very low sample counts which creates temporary fireflies.
+But these artifacts normalize quickly with higher sample counts.
+
+#### Performance
+
+The cost grows roughly linearly with shadow ray count since each additional ray requires intersection testing and shading.
+For practical uses, 1-2 shadow rays provide a good balance between quality and speed, as the quality at 3000 samples matches what the naive path tracer would achieve at 5000 samples.
+Therefore, the per frame cost pays off when factoring in total convergence time.
+
+![Frame timing with and without NEE](img/nee_frametime.png)
+
+Breaking down where the time goes at different bounce depths with 1 shadow ray shows that the NEE overhead is substantial but not too bad.
+At shallow depths (1-2 bounces), the shadow ray processing takes 2.2 ms and 1.4 ms respectively while the main shading kernel roughly doubles from 0.6 ms to 1.5 ms due to the additional shadow ray generation logic.
+All kernel times decrease as bounce depth increases because fewer rays remain active, but the relative timing stays similar.
+The compaction kernel times stay roughly comparable between the two cases, suggesting that shadow rays don't drastically change the active ray count distribution over bounces.
+
+![Subtiming with NEE](img/nee_subtiming.png)
+
+#### GPU vs CPU
+
+Direct lighting benefits from GPU implementation but introduces a few problems.
+Shadow rays increase total ray count, adding memory overhead and more kernel launches.
+Some warp divergence occurs since only diffuse surfaces generate shadow rays, while specular and refractive are handled with delta distributions and skip shadow ray generation entirely.
+Despite this, the GPU's ability to process thousands of shadow rays in parallel still outperforms sequential CPU execution, and a CPU implementation would face the same algorithmic complexity but process rays one at a time.
+
+#### Further Optimizations
+
+There are several ways in which this implementation could be improved.
+First, multiple importance sampling with multiple lights per surface would allow sampling more than one random light per interaction, improving quality in scenes with many small light sources.
+Second, building a light hierarchy using a BVH over emissive geometry would reduce the cost of random light selection in scenes with many lights.
+Third, reservoir-based spatiotemporal importance resampling (ReSTIR) could dramatically improve direct lighting quality by reusing samples across pixels and frame.
+Lastly, the wavefront architecture can provide significant benefit for direct lighting, comparing wavefront with and without shadow rays shows frame time increasing from 22.5 ms to 29.1 ms which is only a 31% increase compared to the 64% increase for the baseline.
+Despite all of this, the current implementation provides substantial quality improvements at a measurable but reasonable performance cost.
+
 ---
 <br><br>
 
@@ -262,6 +312,41 @@ A more efficient approach would store vertices in a separate array and have tria
 ## Performance Features
 
 ### Russian Roulette
+
+Russian roulette probabilistically terminates paths early based on their accumulated throughput, reducing wasted computation on rays that contribute negligibly to the final image.
+
+#### Implementation
+
+The algorithm evaluates paths after a user defined bounce depth threshold.
+At each bounce beyond this threshold, the maximum color channel of the path throughput determines a survival probability p clamped between 0.1 and 1.0.
+A random sample decides whether the path survives and the throughput is divided by p to maintain unbiased results if the sample survives.
+The minimum clamp of 0.1 ensures even very dim paths have some chance of survival to prevent terminating potentially important light paths too early.
+
+#### Performance
+
+The graph below shows that frame time scales linearly with the RR threshold, ranging from 23.6 ms at threshold 1 to 30.5 ms with RR disabled.
+Starting RR at bounce 1 gives roughly a 23% speedup, starting at bounce 3 gives 15% speedup, and starting at bounce 5 gives 12% speedup.
+The linear relationship makes sense—higher thresholds mean more rays survive longer, requiring more shader invocations and intersection tests.
+The diminishing returns past threshold 3 suggest that most of the performance benefit comes from killing rays early in their lifetime.
+
+![Frame times with RR enabled](img/rr_frametime.png)
+
+In simple scenes, even aggressive Russian Roulette does not change rendering behavior by much, even for low sample counts.
+In more complex scenes, it does decrease convergence speed to a degree, but this was not evaluated numerically.
+
+#### GPU vs CPU
+
+Russian roulette works well on GPU despite introducing some warp divergence.
+The termination probability is based on throughput, which varies smoothly across nearby rays, so neighboring threads in a warp tend to make similar decisions.
+The graphs show that even aggressive RR still leaves hundreds of thousands of rays active, which is enough parallelism to keep the GPU saturated.
+A CPU implementation would avoid the divergence overhead entirely but would lose the massive parallel throughput and thus leaving the GPU still as the clear winner.
+
+#### Further Optimizations
+
+The current implementation uses a simple max-channel heuristic for survival probability.
+More sophisticated approaches like luminance-based probabilities or adaptive thresholds based on scene characteristics could potentially improve the quality-performance tradeoff.
+Additionally, combining RR with better path sorting (grouping similar throughput values) could reduce warp divergence further.
+The linear relationship between threshold and frame time suggests the implementation is already reasonably efficient—there's no weird performance cliff or unexpected behavior.
 
 ---
 <br>
