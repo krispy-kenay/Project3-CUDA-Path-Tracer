@@ -11,7 +11,7 @@ Project 3 CUDA Path Tracer
 
 ### Diffuse BSDF
 
-<br><br>
+<br>
 
 ---
 
@@ -20,12 +20,12 @@ Project 3 CUDA Path Tracer
 This path tracer implements stream compaction which moves active rays to the front of the array and dead rays to the back, allowing later kernel launches to process only the active rays rather than the full array.
 
 ---
-<br><br>
+<br>
 
 ### Material Sorting
 
 ---
-<br><br>
+<br>
 
 ### Anti-Aliasing
 
@@ -87,7 +87,7 @@ This can be counteracted by sorting the rays by material type before shading or 
 Implementing glossy and rough specular materials would greatly enhance the variety of scenes that can be represented, though it would also introduce additional calculations and branching that could negatively impact performance
 
 ---
-<br><br>
+<br>
 
 ### Sampling Methods
 
@@ -127,7 +127,7 @@ Both sampling methods work well on GPU. The sampling computation is uniform acro
 Adaptive sampling which concentrates samples in high-variance regions or other spatially aware sampling methods would likely much more explicitly lower variance faster than Sobol sampling.
 
 ---
-<br><br>
+<br>
 
 ### Depth of Field
 
@@ -172,14 +172,14 @@ More sophisticated lens models (thick lens simulation or realistic optical syste
 ### Russian Roulette
 
 ---
-<br><br>
+<br>
 
 ### Hierarchical Spatial Data Structure
 
 ---
-<br><br>
+<br>
 
 ### Wavefront Path Tracing
 
 ---
-<br><br>
+<br>
