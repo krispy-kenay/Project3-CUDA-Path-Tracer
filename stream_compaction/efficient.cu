@@ -245,10 +245,10 @@ namespace StreamCompaction {
             //timer().startGpuTimer();
 
             StreamCompaction::Common::kernMapToBoolean<<<gridSize, BLOCK_SIZE >>>(n, dev_flags, dev_in);
-            cudaDeviceSynchronize();
+            //cudaDeviceSynchronize();
 
-            scanDeviceShared(n, dev_indices, dev_flags);
-            cudaDeviceSynchronize();
+            scanDevice(n, dev_indices, dev_flags);
+            //cudaDeviceSynchronize();
 
             int lastScan, lastFlag;
             cudaMemcpy(&lastScan, dev_indices + (n - 1), sizeof(int), cudaMemcpyDeviceToHost);
@@ -256,7 +256,7 @@ namespace StreamCompaction {
             int validCount = lastScan + lastFlag;
 
             kernScatterPartition<<<gridSize, BLOCK_SIZE >>>(n, dev_in, dev_out, dev_flags, dev_indices, validCount);
-            cudaDeviceSynchronize();
+            //cudaDeviceSynchronize();
             //timer().endGpuTimer();
 
             cudaFree(dev_flags);
