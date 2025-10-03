@@ -81,6 +81,10 @@ Therefore the conclusion in this project was, that time would be better spent on
 
 This path tracer implements specular reflective materials and basic refractive materials (no glossy materials or roughness).
 
+| Diffuse Sphere | Refractive Sphere | Specular Sphere |
+| --- | --- | --- |
+| ![Diffuse sphere](img/baseline_simple.png) | ![Refractive sphere](img/baseline_refractive.png) | ![Specular sphere](img/baseline_specular.png) |
+
 #### Implementation
 
 For specular reflection, the standard mirror reflection formula to compute the outgoing direction as a pure reflection about the surface normal are used.
@@ -89,11 +93,6 @@ At each surface interaction, the code chooses between reflection and refraction 
 Otherwise it refracts according to the ratio of refractive indices.
 
 Both specular and refractive interactions are marked as delta distributions for the MIS implementation later.
-
-
-| Diffuse Sphere | Refractive Sphere | Specular Sphere |
-| --- | --- | --- |
-| ![Diffuse sphere](img/baseline_simple.png) | ![Refractive sphere](img/baseline_refractive.png) | ![Specular sphere](img/baseline_specular.png) |
 
 #### Performance
 
@@ -137,6 +136,10 @@ Implementing glossy and rough specular materials would greatly enhance the varie
 This path tracer implements stratified sampling with cranley-patterson rotation and low-discrepancy Sobol sequences, both of which aim to reduce variance and improve sample distribution.
 Uniform random sampling can sometimes struggle with subtle low-contrast features like penumbras, an area that both methods aim to address.
 
+| Uniform random sampling | Stratified + Sobol sampling |
+| --- | --- |
+| ![Sobol off](img/sobol_off.png) | ![Sobol on](img/sobol_on.png) |
+
 #### Implementation
 
 Stratified sampling divides each sample dimension into temporal strata across iterations rather than spatial strata within a single pixel (since we're shooting one ray per pixel per iteration).
@@ -147,10 +150,6 @@ Sobol sampling is a quasi-random low-discrepancy sequence that theoretically pro
 The same Sobol sampling is also used in the diffuse shader for hemisphere sampling and in shadow ray generation for light sampling, so the toggle affects sampling throughout the entire path tracer.
 
 For the random number generator, the `thrust::default_random_engine rng = makeSeededRandomEngine(iter, index, 0);` was upgraded to an xorshift32 based generator for slightly faster random sampling.
-
-| Uniform random sampling | Stratified + Sobol sampling |
-| --- | --- |
-| ![Sobol off](img/sobol_off.png) | ![Sobol on](img/sobol_on.png) |
 
 #### Performance
 
@@ -176,6 +175,10 @@ Adaptive sampling which concentrates samples in high-variance regions or other s
 
 This path tracer implements various real world camera properties like f-stop, focal length and focal distance to simulate depth of field (colloquially known as bokeh effect).
 
+| Pinhole Camera | f/8 | f/2.8 |
+| --- | --- | --- |
+| ![DOF baseline](img/intermed_simple.png) | ![DOF f8](img/intermed_dof_f8.png) | ![DOF f2.8](img/intermed_dof_f2-8.png) |
+
 #### Implementation
 
 Each camera ray originates from a randomly sampled point on a circular aperture rather than a single pinhole.
@@ -183,10 +186,6 @@ The code first computes the standard pinhole ray direction, then calculates wher
 The ray origin then gets offset to a point on the lens, and the direction gets recomputed to pass through the focal point.
 The f-stop controls the lens radius, with lower f-numbers producing shallower depth of field. The focal length values were scaled arbitrarily for this demonstration.
 With proper physical units the scaling factor would need to be adjusted to match real-world camera behavior, but the f-stop values themselves don't really mean anything with unitless scene dimensions.
-
-| Pinhole Camera | f/8 | f/2.8 |
-| --- | --- | --- |
-| ![DOF baseline](img/intermed_simple.png) | ![DOF f8](img/intermed_dof_f8.png) | ![DOF f2.8](img/intermed_dof_f2-8.png) |
 
 #### Performance
 
@@ -206,6 +205,56 @@ More sophisticated lens models (thick lens simulation or realistic optical syste
 ## Mesh Improvements
 
 ### OBJ File Loading
+
+The path tracer supports loading arbitrary triangle meshes from `.obj` files, to expand the range of geometry that can be rendered beyond the basic primitives.
+
+![Utah Teapot in Blue](img/teapot_aa.png)
+
+#### Implementation
+
+The loader uses tinyobjloader to parse `.obj` files and their associated `.mtl` material definitions.
+When a mesh object is specified in the scene `.json` file, the loader reads the OBJ file, extracts vertex positions and normals and creates individual triangle geometry for each face.
+The code applies transformation matrices specified in the scene description to all vertices and normals to allow for easy manipulation within the scene.
+
+If the `.json` specifies a material override (e.g. ` "MATERIAL": "diffuse_white"`), all triangles use that material.
+Otherwise, the loader parses the `.mtl` file, extracts material properties and adds the material to the internal material system.
+If a triangle has no assigned material, it gets a default gray diffuse material.
+Textures, glossy materials and roughness are currently not supported and will be ignored upon parsing the file.
+
+To include an `.obj` mesh in a scene, add an object entry to the scene `.json` like this:
+
+```json
+{
+  "TYPE": "mesh",
+  "FILE": "models/teapot.obj",
+  "MATERIAL": "DiffuseWhite",
+  "TRANS": [0, 0, 0],
+  "ROTAT": [0, 0, 0],
+  "SCALE": [1, 1, 1]
+}
+```
+
+The `FILE` path is relative to the scene file location. The `MATERIAL` field is optional and determines the material override.
+
+#### Performance
+
+Without spatial acceleration, mesh rendering performance drops off a cliff.
+The Utah teapot (about 3.5k triangles) example above runs at 676.5 ms/frame compared to the baseline cornell box at 36.3 ms/frame.
+This makes sense since every ray tests intersection against every triangle with 3,500 brute force intersection tests per ray per bounce instead of the handful of primitives in the basic scenes.
+This is completely unusable for any practical rendering without a spatial data structure.
+
+#### GPU vs CPU
+
+Triangle intersection tests benefit from running on the GPU similar to sphere and cube intersection tests, it can be run in parallel easily.
+A CPU implementation on the other hand, would face the same algorithmic complexity but process rays sequentially, making it even slower.
+But the real bottleneck here isn't the architecture, it's the $O(n \cdot m)$ (n rays, m triangles) intersection tests.
+
+#### Further Optimizations
+
+The current implementation lacks texture coordinate and UV mapping support, so all materials use flat colors instead of textured meshes.
+The material system also doesn't support more advanced features like roughness or glossy reflections, which means everything is either perfectly diffuse, perfectly specular, or refractive.
+The loader currently creates one `Geom` per triangle, which is memory intensive for large meshes.
+A more efficient approach would store vertices in a separate array and have triangles reference indices for a smaller memory footprint.
 
 ---
 <br><br>
