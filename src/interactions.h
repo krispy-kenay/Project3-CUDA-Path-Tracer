@@ -14,6 +14,10 @@
 __host__ __device__ glm::vec3 calculateRandomDirectionInHemisphere(
     glm::vec3 normal, 
     XRNG& rng);
+__host__ __device__ glm::vec3 calculateRandomDirectionInHemisphere(
+    glm::vec3 normal,
+    float u1,
+    float u2);
 
 /**
  * Scatter a ray with some probabilities according to the material properties.
@@ -40,9 +44,16 @@ __host__ __device__ glm::vec3 calculateRandomDirectionInHemisphere(
  *
  * You may need to change the parameter list for your purposes!
  */
-__host__ __device__ void scatterRay(
+__device__ void scatterRay(
+    int iter, int depth, int num_paths,
     PathSegment& pathSegment,
     glm::vec3 intersect,
     glm::vec3 normal,
     const Material& m,
-    XRNG& rng);
+    XRNG& rng,
+    bool useSobol);
+
+__device__ void scatterRayDiffuse(int iter, int depth, int num_paths, PathSegment& pathSegment, glm::vec3 intersect, glm::vec3 normal, const Material& m, XRNG& rng, bool useSobol);
+__device__ void scatterRaySpecular(PathSegment& pathSegment, glm::vec3 intersect, glm::vec3 normal, const Material& m, XRNG& rng);
+__device__ void scatterRayRefractive(PathSegment& pathSegment, glm::vec3 intersect, glm::vec3 normal, const Material& m, XRNG& rng);
+__device__ void scatterRayShadow(int iter, int depth, int num_paths, PathSegment& pathSegment, glm::vec3 intersect, glm::vec3 normal, const Material& m, const Material& lm, const Geom& l, XRNG& rng, int num_lights, int num_shadow_rays, bool useSobol);
