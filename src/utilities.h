@@ -18,16 +18,26 @@
 class GuiDataContainer
 {
 public:
-    GuiDataContainer() : TracedDepth(0), antiAliasing(false), StratifiedSampling(false), SortMaterial(false), RussianRoulette(false), DirectLighting(false), ShowBSDFContrib(true), ShowShadowContrib(true), Strata(4), MaxSPP(1024) {}
+    GuiDataContainer() : TracedDepth(8), printDebugStats(false), useBVH(true), wavefront(true), antiAliasing(false), StratifiedSampling(false), Strata(4), SobolSampling(false), SortMaterial(true), useCompaction(true), RussianRoulette(false), depthRussianRoulette(5), DirectLighting(false), NumShadowRays(1), showEmissive(true), showRefractive(true), showSpecular(true), showDiffuse(true), showShadows(true), MaxSPP(1024) {}
     int TracedDepth;
+    bool printDebugStats;
+    bool useBVH;
+    bool wavefront;
     bool antiAliasing;
     bool StratifiedSampling;
-    bool SortMaterial;
-    bool RussianRoulette;
-    bool DirectLighting;
-    bool ShowBSDFContrib;
-    bool ShowShadowContrib;
     int Strata;
+    bool SobolSampling;
+    bool SortMaterial;
+    bool useCompaction;
+    bool RussianRoulette;
+    int depthRussianRoulette;
+    bool DirectLighting;
+    int NumShadowRays;
+    bool showEmissive;
+    bool showRefractive;
+    bool showSpecular;
+    bool showDiffuse;
+    bool showShadows;
     int MaxSPP;
 };
 
