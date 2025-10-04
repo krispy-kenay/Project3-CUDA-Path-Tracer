@@ -176,7 +176,7 @@ Both specular and refractive interactions are marked as delta distributions for 
 The frametimes for the different materials for this simple scene are within 5%, with specular doing marginally better probably because of its deterministic, non-branching computation path.
 Scaling this up to 3 scenes, reveals that they all scale at approximately the same rate for increasing scene complexity.
 This is the expected behavior, since in all cases the ray gets manipulated (scattered, reflected, transmitted) and then continues onward.
-Performance is expected to get worse as more geometry is added into a scene and it appears that the material type does not substantial affect this scaling.
+Performance is expected to get worse as more geometry is added into a scene and it appears that the material type does not substantially affect this scaling.
 
 ![Material Performance Differences](img/perf_materials.png)
 <br>
