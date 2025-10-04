@@ -31,7 +31,12 @@ With Sobol sampling enabled, the random samples come from the quasi-random seque
 
 #### Performance
 
-Diffuse shading is the first and most basic type implemented here, and as such comparing against a further reduced baseline is impossible.
+For the intermediate cornell box test scene, the diffuse BSDF adds roughly 7.5% overhead compared to the baseline "fake" shader (12.7 ms/frame vs 13.6 ms/frame).
+The fake shader emulates rasterizer style shading that terminates rays immediately after the first hit.
+The diffuse BSDF overhead comes from hemisphere sampling, constructing the local coordinate frame, evaluating the BSDF PDF, and continuing the path through multiple bounces.
+The cost is reasonable, given that the diffuse shader implements actual light transport while the fake shader just approximates surface appearance in a single pass.
+
+![Fake vs Real Shader](img/diffuse_perf.png)
 
 #### GPU vs CPU
 
