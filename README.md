@@ -11,6 +11,30 @@ Project 3 CUDA Path Tracer
 
 ### Diffuse BSDF
 
+The diffuse BSDF implements Lambertian reflection using cosine-weighted hemisphere sampling.
+When a ray hits a diffuse surface, the shader generates a new direction by sampling the hemisphere oriented around the surface normal. 
+
+#### Implementation
+
+Two random samples generate a point on the hemisphere weighted towards the normal.
+The BSDF PDF is computed as $\cos(\theta) / \pi$ where $\theta$ is the angle between the normal and the outgoing direction.
+The path throughput then gets multiplied by the material color to accumulate color information until it hits a light when it gets deposited.
+With Sobol sampling enabled, the random samples come from the quasi-random sequence instead of the PRNG.
+
+#### Performance
+
+Diffuse shading is the first and most basic type implemented here, and as such comparing against a further reduced baseline is impossible.
+
+#### GPU vs CPU
+
+Diffuse sampling is perfectly suited for GPU.
+Every ray undergoes identical sampling operations with no branching, which results in complete coherence across warps.
+A CPU version would be slower due to sequential processing with no inherent advantage.
+
+#### Further Optimizations
+
+Implementing importance sampling for materials could be beneficial, as the sampling distribution could account for color variation across the surface.
+
 <br>
 
 ---
@@ -54,7 +78,8 @@ Thus both work-efficient stream compaction implementations (adapted from Project
 
 #### GPU vs CPU
 
-Parallel scan and scattering are operations that can be parallelized and with proper implementation (like `thrust` does) run super fast. While modern CPUs can keep up for smaller arrays, the sequential nature of CPUs tends to favor GPUs for larger arrays.
+Parallel scan and scattering are operations that can be parallelized and with proper implementation (like `thrust` does) run super fast.
+While modern CPUs can keep up for smaller arrays, the sequential nature of CPUs tends to favor GPUs for larger arrays.
 
 #### Further Optimizations
 
@@ -67,10 +92,49 @@ Therefore the conclusion in this project was, that time would be better spent on
 
 ### Material Sorting
 
+Material sorting attempts to reduce warp divergence by grouping rays by material type before shading, so that threads in a warp execute the same shader code.
+
+#### Implementation
+
+The implementation uses Thrust's sort by key to reorder rays based on their material ID.
+An earlier version used the radix sort implementation from project 2, but even with shared memory optimizations it performed so bad that it was pointless.
+
+#### Performance
+
+TBA
+
+#### GPU vs CPU
+
+Sorting benefits from GPU implementations as many operations can run in parallel.
+However, material sorting is done to reduce warp divergence, which is not a problem on the CPU.
+Thus, a CPU path tracer wouldn't implement material sorting.
+
+#### Further Optimizations
+
+As demonstrated further below, the wavefront architecture naturally groups rays by material type and eliminates the need for sorting entirely while keeping coherence.
+
 ---
 <br>
 
 ### Anti-Aliasing
+
+Anti-aliasing eliminates jagged edges on geometry by jittering ray origins within each pixel rather than always sampling from the pixel center.
+
+#### Implementation
+
+Each sample adds a random offset within the pixel's unit square to the ray origin before computing the ray direction.
+The offset comes from the PRNG by default, but with stratified or Sobol sampling enabled, those patterns affect the jitter distribution as well.
+
+#### Performance
+
+TBA
+
+#### GPU vs CPU
+
+Anti-aliasing adds negligible overhead with just a couple of random samples and arithmetic operations per ray with no branching.
+A CPU implementation would be equally simple but slower due to its sequential nature.
+
+#### Further Optimizations
 
 ---
 <br><br>
@@ -123,7 +187,8 @@ Diffuse shading only needs to accumulate the color throughput and calculate a ne
 
 #### Further Optimizations
 
-While scaling in a simple scene appears to not be affected by material type, there are cases where this can be problematic. As long as shading is done in a single monolithic kernel, there will be divergence between the threads due to different branching conditions that could cause additional slowdown. 
+While scaling in a simple scene appears to not be affected by material type, there are cases where this can be problematic.
+As long as shading is done in a single monolithic kernel, there will be divergence between the threads due to different branching conditions that could cause additional slowdown. 
 This can be counteracted by sorting the rays by material type before shading or using a queue based system where each material gets sorted into its own queue (wavefront). Both of these will be investigated further below.
 
 Implementing glossy and rough specular materials would greatly enhance the variety of scenes that can be represented, though it would also introduce additional calculations and branching that could negatively impact performance
@@ -353,10 +418,84 @@ The linear relationship between threshold and frame time suggests the implementa
 
 ### Hierarchical Spatial Data Structure
 
+A bounding volume hierarchy accelerates ray-scene intersection by organizing geometry into a tree structure, allowing the traversal to skip large portions of the scene that a ray doesn't intersect.
+
+#### Implementation
+
+The implementation uses the LBVH (Linear Bounding Volume Hierarchy) algorithm, which builds the tree on the GPU.
+The algorithm computes Morton codes for primitive centroids, sorts primitives by Morton code and then constructs the tree structure using the sorted order.
+Traversal uses a stackless approach based on parent pointers, avoiding the memory overhead and divergence of explicit stack-based traversal.
+
+#### Performance
+
+For moderate complexity meshes (a few thousand triangles), the difference is dramatic as can be seen in the graph below.
+Without BVH, even the Utah teapot is closer to seconds per frame than frames per second.
+With BVH enabled, performance returns to near-baseline levels (38.189 ms/frame vs ~30 ms/frame).
+
+![Frame Times for BVH vs no BVH](img/bvh_frametime.png)
+
+Building the BVH adds some overhead but its negligible compared to even the average frame time at around 9-10 ms.
+Despite the bunny having nearly 20x more triangles than the teapot, the build time only increases by 0.6 ms.
+This indicated that the overhead is completely hidden by GPU parallelization.
+This flat scaling means the one-time build cost is negligible even for complex meshes, making it a pure win for any scene with more than a handful of primitives.
+BVH construction speeds of this magnitude would even allow for per frame BVH rebuilds at a reasonable speed, which is needed for real-time path tracing of moving objects.
+
+![Build Times for BVH](img/bvh_buildtime.png)
+
+#### GPU vs CPU
+
+BVHs benefit a lot from GPU parallelization despite introducing some warp divergence (different rays traverse different parts of the tree).
+The sheer number of rays being processed simultaneously outweighs the divergence cost.
+A CPU implementation would avoid divergence but process rays sequentially, which would make it far slower for complex scenes.
+The GPU build is also much faster than CPU alternatives due to parallel sorting and tree construction, although for simple scenes constructing the BVH on the CPU would likely be good enough.
+
+#### Further Optimizations
+
+The current LBVH implementation prioritizes build speed over tree quality and Surface Area Heuristic (SAH) based builders produce better trees with fewer traversal steps but take longer to construct.
+Particularly for static scenes where the tree only needs to be built once, an SAH optimized BVH builder would likely outperform LBVH.
+But for raw build speed performance, LBVH on the GPU is near the top of the pack.
+
 ---
 <br>
 
 ### Wavefront Path Tracing
 
+Wavefront path tracing reorganizes the path tracer into material-specific queues, processing all rays of the same material type together to maximize GPU coherence.
+
+#### Implementation
+
+The architecture splits shading into material-specific shaders with a queue-based system.
+The pipeline runs:
+1. Intersection kernel (calculates intersections for all rays in the main queue)
+2. Dispatch kernel (splits rays into separate queues based on material type using atomic adds)
+3. Shaders for each material type (diffuse, specular, refractive, emissive, shadow setup, and shadow accumulation)
+4. Consolidation kernel (merges all material queues back into the main queue using atomic adds).
+
+The shadow rays are handled as two separate queues: shadow setup (which converts diffuse rays into shadow rays and calculates directions) and shadow accumulation (which accumulates the lighting contributions after intersection testing).
+This treats shadow rays as regular rays, feeding them through the same intersection kernel for streamlining.
+Each queue is sized to accommodate the maximum ray count, trading memory for performance.
+The atomic adds prevent race conditions when multiple threads write to the same queue, and the material-based splitting naturally provides both coherence (threads in a warp execute the same shader) and compaction (only active rays are processed).
+
+#### Performance
+
+TBA
+
+#### GPU vs CPU
+
+Wavefront architecture is specifically designed to exploit GPU strengths and has no advantages on the CPU since coherence isn't a problem.
+A CPU implementation would just add unnecessary queue overhead with no benefit, so this wouldn't even be considered for CPU path tracers.
+
+#### Further Optimizations
+
+The current implementation sizes all queues to the maximum ray count, which wastes memory.
+Dynamic queue sizing based on estimated material distribution could reduce memory footprint.
+Additionally, the atomic adds during dispatch and consolidation introduce some serialization which could be alleviated by skipping the merge entirely and using only the per-material queues (with one initial dispatch step).
+The shadow ray handling could potentially be simplified, though the current two-queue approach works well by treating shadow rays uniformly with camera rays during intersection.
+
+
 ---
 <br>
+
+## References
+
+TBA
