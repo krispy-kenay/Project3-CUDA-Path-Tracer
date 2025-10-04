@@ -72,10 +72,13 @@ Each block processes a tile of elements entirely in shared memory and computes p
 
 #### Performance
 
-The graph below shows how the number of active rays evolves with bounce depth when compaction is enabled. The ray count decreases somewhat linearly from 522,868 to just 139,503 before reaching zero at the last bounce. 
-This happens because rays miss geometry or are terminated early (with Russian Roulette for example, which was not enabled for this). The idea is that by compacting the ray array after each bounce, only the surviving rays are processed in the next iteration which allows for smaller kernel launches and ideally a faster total execution times.
+The graph below shows how the number of active rays evolves with bounce depth when compaction is enabled in open and closed scenes.
+In the open scene, the ray count decreases somewhat linearly from 605,026 to just 194,348 before reaching zero at the last bounce, which represents a roughly 60% decrease in the number of active rays. 
+This happens because rays miss geometry or are terminated early when they hit a light emitter.
+The idea is that by compacting the ray array after each bounce, only the surviving rays are processed in the next iteration which allows for smaller kernel launches and ideally a faster total execution times.
+In the closed scene, rays persist across more bounces, which limits the relative benefit of compaction since fewer rays terminate early.
 
-![Rays Alive after Compaction](img/active_rays_compactioni.png)
+![Rays Alive after Compaction](img/open_closed.png)
 <br>
 <sub>*Number of active rays in the array after compaction during the very first iteration*</sub>
 
@@ -115,11 +118,15 @@ Material sorting attempts to reduce warp divergence by grouping rays by material
 #### Implementation
 
 The implementation uses Thrust's sort by key to reorder rays based on their material ID.
-An earlier version used the radix sort implementation from project 2, but even with shared memory optimizations it performed so bad that it was pointless.
+An earlier version used the radix sort implementation from project 2, but even with shared memory optimizations it performed so poorly that it was pointless.
 
 #### Performance
 
-TBA
+The graph below shows that sorting by material type increases shading coherence but introduces a constant sorting overhead of roughly 0.6 ms to 0.9 ms per bounce.
+For this scene, the additional cost outweighs the divergence reduction, leading to an overall slower frame time despite more balanced shading workloads.
+Concretely, sorting increased total frame time from 15.3 ms to 20.0 ms, primarily due to the overhead of the sorting step.
+
+![Material sorting kernel subtiming](img/material_subtiming.png)
 
 #### GPU vs CPU
 
@@ -138,6 +145,10 @@ As demonstrated further below, the wavefront architecture naturally groups rays 
 
 Anti-aliasing eliminates jagged edges on geometry by jittering ray origins within each pixel rather than always sampling from the pixel center.
 
+| AA disabled | AA enabled |
+| --- | --- |
+| ![AA disabled](img/sphere_simple.png) | ![AA enabled](img/sphere_aa.png) |
+
 #### Implementation
 
 Each sample adds a random offset within the pixel's unit square to the ray origin before computing the ray direction.
@@ -145,7 +156,9 @@ The offset comes from the PRNG by default, but with stratified or Sobol sampling
 
 #### Performance
 
-TBA
+For anti-aliasing, the performance difference between enabled and disabled is effectively zero.
+Across repeated runs on the various scenes, the frame time fluctuations overshadow any perceptible performance difference.
+This makes sense since the additional work per ray only consists of generating two random offsets and adjusting the ray direction.
 
 #### GPU vs CPU
 
