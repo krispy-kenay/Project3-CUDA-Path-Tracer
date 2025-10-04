@@ -18,6 +18,10 @@ Project 3 CUDA Path Tracer
 The diffuse BSDF implements Lambertian reflection using cosine-weighted hemisphere sampling.
 When a ray hits a diffuse surface, the shader generates a new direction by sampling the hemisphere oriented around the surface normal. 
 
+| "Fake" Shader | Diffuse BSDF |
+| --- | --- | 
+| ![Fake shader](img/baseline_fake.png) | ![Diffuse shader](img/baseline_simple.png) |
+
 #### Implementation
 
 Two random samples generate a point on the hemisphere weighted towards the normal.
