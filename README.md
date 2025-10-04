@@ -55,8 +55,6 @@ Implementing importance sampling for materials could be beneficial, as the sampl
 
 <br>
 
----
-
 ### Stream Compaction
 
 This path tracer implements stream compaction which moves active rays to the front of the array and dead rays to the back, allowing later kernel launches to process only the active rays rather than the full array.
@@ -108,7 +106,6 @@ The current implementation allocates temporary buffers for flags and indices on 
 More importantly however, compaction becomes unnecessary with the wavefront architecture (see below), which naturally achieves compaction through its queue-based design.
 Therefore the conclusion in this project was, that time would be better spent on another optimization that eliminates the need for compaction altogether while at the same time improving coherence between threads!
 
----
 <br>
 
 ### Material Sorting
@@ -138,7 +135,6 @@ Thus, a CPU path tracer wouldn't implement material sorting.
 
 As demonstrated further below, the wavefront architecture naturally groups rays by material type and eliminates the need for sorting entirely while keeping coherence.
 
----
 <br>
 
 ### Anti-Aliasing
@@ -224,7 +220,6 @@ This can be counteracted by sorting the rays by material type before shading or 
 
 Implementing glossy and rough specular materials would greatly enhance the variety of scenes that can be represented, though it would also introduce additional calculations and branching that could negatively impact performance
 
----
 <br>
 
 ### Sampling Methods
@@ -264,7 +259,6 @@ Both sampling methods work well on GPU. The sampling computation is uniform acro
 
 Adaptive sampling which concentrates samples in high-variance regions or other spatially aware sampling methods would likely much more explicitly lower variance faster than Sobol sampling.
 
----
 <br>
 
 ### Depth of Field
@@ -295,6 +289,8 @@ Every ray undergoes identical lens sampling calculations with no branching, whic
 
 More sophisticated lens models (thick lens simulation or realistic optical systems) could enhance realism, but would incur slightly increased computational cost.
 
+<br>
+
 ### Direct Lighting
 
 Direct lighting with next event estimation (NEE) dramatically accelerates convergence by explicitly sampling light sources at each diffuse surface interaction rather than relying solely on random path connections to find lights.
@@ -323,9 +319,8 @@ Therefore, the per frame cost pays off when factoring in total convergence time.
 ![Frame timing with and without NEE](img/nee_frametime.png)
 
 Breaking down where the time goes at different bounce depths with 1 shadow ray shows that the NEE overhead is substantial but not too bad.
-At shallow depths (1-2 bounces), the shadow ray processing takes 2.2 ms and 1.4 ms respectively while the main shading kernel roughly doubles from 0.6 ms to 1.5 ms due to the additional shadow ray generation logic.
+At shallow depths (1-2 bounces), the shadow ray processing takes 2.2 ms and 1.4 ms respectively while the main shading kernel roughly doubles from 0.6 ms to 1.5 ms due to the additional shadow ray logic.
 All kernel times decrease as bounce depth increases because fewer rays remain active, but the relative timing stays similar.
-The compaction kernel times stay roughly comparable between the two cases, suggesting that shadow rays don't drastically change the active ray count distribution over bounces.
 
 ![Subtiming with NEE](img/nee_subtiming.png)
 
@@ -444,7 +439,6 @@ More sophisticated approaches like luminance-based probabilities or adaptive thr
 Additionally, combining RR with better path sorting (grouping similar throughput values) could reduce warp divergence further.
 The linear relationship between threshold and frame time suggests the implementation is already reasonably efficient—there's no weird performance cliff or unexpected behavior.
 
----
 <br>
 
 ### Hierarchical Spatial Data Structure
@@ -486,7 +480,6 @@ The current LBVH implementation prioritizes build speed over tree quality and Su
 Particularly for static scenes where the tree only needs to be built once, an SAH optimized BVH builder would likely outperform LBVH.
 But for raw build speed performance, LBVH on the GPU is near the top of the pack.
 
----
 <br>
 
 ### Wavefront Path Tracing
@@ -523,9 +516,23 @@ Dynamic queue sizing based on estimated material distribution could reduce memor
 Additionally, the atomic adds during dispatch and consolidation introduce some serialization which could be alleviated by skipping the merge entirely and using only the per-material queues (with one initial dispatch step).
 The shadow ray handling could potentially be simplified, though the current two-queue approach works well by treating shadow rays uniformly with camera rays during intersection.
 
-
 ---
-<br>
+<br><br>
+
+## Conclusion
+
+Overall, this project demonstrates how physically-based rendering can be efficiently implemented on the GPU.
+While certain optimizations such as stream compaction or material sorting showed limited benefit on simpler scenes, other optimizations like Russian Roulette showed a clear performance gain with minimal loss of quality.
+Combining direct lighting, refractive materials, and BVH acceleration allowed rendering complex scenes like Sponza at reasonable speeds with accurate lighting.
+Future extensions could focus on implementing adaptive sampling, denoising, glossy materials and textures to enable rendering more physically accurate scenes with less samples.
+
+## Additional Notes
+
+All performance tests were done on the scene below, unless specified otherwise in the section:
+
+![Performance baseline](img/intermed_simple.png)
+
+Further, the baseline tracer with material sorting and compaction enabled was used as the reference point (except in the material sorting and compaction sections).
 
 ## References
 
