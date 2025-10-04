@@ -7,6 +7,11 @@
 Project 3 CUDA Path Tracer
 ====================
 
+This project implements a CUDA-based path tracer with various features and optimizations.
+The implementation supports diffuse, specular, and refractive materials, stochastic anti-aliasing, and direct lighting with multiple importance sampling.
+Advanced camera effects such as depth of field are modeled after real optics.
+Performance features include work-efficient stream compaction, material sorting, Russian Roulette path termination, LBVH acceleration structure for fast mesh intersection and a wavefront path tracing architecture to maximize GPU coherence across different material types.
+
 ![Cover Image](img/sponza_showcase.png)
 <br>
 <sub>*Sponza model rendered at 8096spp with textures mapped to diffuse and specular materials. Render performance at around ~872 ms/frame, total time ~2 hours.*</sub>
@@ -431,7 +436,7 @@ The linear relationship between threshold and frame time suggests the implementa
 
 ### Hierarchical Spatial Data Structure
 
-A bounding volume hierarchy accelerates ray-scene intersection by organizing geometry into a tree structure, allowing the traversal to skip large portions of the scene that a ray doesn't intersect.
+A Bounding Volume Hierarchy (BVH) accelerates ray-scene intersection by organizing geometry into a tree structure, allowing the traversal to skip large portions of the scene that a ray doesn't intersect.
 
 #### Implementation
 
