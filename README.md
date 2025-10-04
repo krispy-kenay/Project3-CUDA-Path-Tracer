@@ -7,6 +7,10 @@
 Project 3 CUDA Path Tracer
 ====================
 
+![Cover Image](img/sponza_showcase.png)
+<br>
+<sub>*Sponza model rendered at 8096spp with textures mapped to diffuse and specular materials. Render performance at around ~872 ms/frame, total time ~2 hours.*</sub>
+
 ## Basic Features
 
 ### Diffuse BSDF
