@@ -23,8 +23,9 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <chrono>
 
-#define SCENE "C:/Users/Shadow/Documents/GPU Programming/Project3-CUDA-Path-Tracer/scenes/cornell.json"
+#define SCENE "C:/Users/Shadow/Documents/GPU Programming/Project3-CUDA-Path-Tracer/scenes/teapot.json"
 
 
 static std::string startTimeString;
@@ -48,6 +49,10 @@ Scene* scene;
 GuiDataContainer* guiData;
 RenderState* renderState;
 int iteration;
+
+static char buffer[32];
+static int defaultIter;
+static float pathtraceTime;
 
 int width;
 int height;
@@ -290,37 +295,22 @@ void RenderImGui()
     
     ImGui::Text("Traced Depth %d", imguiData->TracedDepth);
     ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
+    ImGui::Text("Pathtrace average %.3f ms/frame", pathtraceTime / iteration);
 
-    ImGui::Text("--- Sampling & Camera ---");
-    const char* sppOptions[] = { "2", "4", "8", "16", "32", "64", "128", "256", "512", "1024" };
-    static int current = 9;
-
+    ImGui::Text("--- Camera ---");
+    const char* sppOptions[] = { buffer, "2", "4", "8", "16", "32", "64", "128", "256", "512", "1024", "2048", "4096", "8096"};
+    static int current = 0;
     if (ImGui::Combo("Max SPP", &current, sppOptions, IM_ARRAYSIZE(sppOptions))) {
-        guiData->MaxSPP = 1 << (current + 1);
-        renderState->iterations = guiData->MaxSPP;
-        iteration = 0;
-        camchanged = true;
-    }
-
-    bool prevAA = guiData->antiAliasing;
-    if (ImGui::Checkbox("Enable Antialiasing", &guiData->antiAliasing)) {
-        iteration = 0;
-        camchanged = true;
-    }
-    int prevStrata = guiData->Strata;
-    if (guiData->antiAliasing) {
-        if (ImGui::Checkbox("Enable Stratified Sampling", &guiData->StratifiedSampling)) {
-            iteration = 0;
-            camchanged = true;
+        if (current == 0) {
+            renderState->iterations = defaultIter;
         }
-        if (guiData->StratifiedSampling) {
-            if (ImGui::SliderInt("Grid Size", &guiData->Strata, 1, 12)) {
-                iteration = 0;
-                camchanged = true;
-            }
+        else {
+            guiData->MaxSPP = 1 << (current);
+            renderState->iterations = guiData->MaxSPP;
         }
+        iteration = 0; camchanged = true;
     }
-    static const char* apertureOptions[] = {"pinhole", "f/1.4", "f/2.0", "f/2.8", "f/4.0","f/5.6", "f/8.0", "f/11", "f/16"};
+    static const char* apertureOptions[] = { "pinhole", "f/1.4", "f/2.0", "f/2.8", "f/4.0","f/5.6", "f/8.0", "f/11", "f/16" };
     static int currentAperture = 0;
     if (ImGui::Combo("Aperture", &currentAperture, apertureOptions, IM_ARRAYSIZE(apertureOptions))) {
         if (currentAperture == 0) {
@@ -329,17 +319,60 @@ void RenderImGui()
         else {
             float fStops[] = { 1.4f, 2.0f, 2.8f, 4.0f, 5.6f, 8.0f, 11.0f, 16.0f };
             float fStop = fStops[currentAperture - 1];
-            renderState->camera.lensRadius = renderState->camera.focalDistance / (2.0f * fStop);
+            renderState->camera.lensRadius = (renderState->camera.focalLength / 10) / (2.0f * fStop);
         }
         iteration = 0;
         camchanged = true;
     }
     if (currentAperture != 0) {
-        if (ImGui::SliderFloat("Focal Distance", &renderState->camera.focalDistance, 0.1f, 100.f)) {
-            iteration = 0;
-            camchanged = true;
+        if (ImGui::SliderFloat("Focal Distance", &renderState->camera.focalDistance, 0.1f, 30.f)) {
+            iteration = 0; camchanged = true;
+        }
+        if (ImGui::SliderInt("Focal Length", &renderState->camera.focalLength, 35, 85)) {
+            iteration = 0; camchanged = true;
         }
     }
+
+
+
+    ImGui::Text("--- Performance ---");
+    if (ImGui::Checkbox("Use BVH", &guiData->useBVH)) {
+        iteration = 0; camchanged = true;
+    }
+    if (ImGui::Checkbox("use Wavefront", &guiData->wavefront)) {
+        iteration = 0; camchanged = true;
+    }
+    if (ImGui::Checkbox("Enable Russian Roulette", &guiData->RussianRoulette)) {
+        iteration = 0; camchanged = true;
+    }
+    if (guiData->RussianRoulette) {
+        if (ImGui::SliderInt("Roulette Threshold", &guiData->depthRussianRoulette, 1, 10)) {
+            iteration = 0; camchanged = true;
+        }
+    }
+
+
+    ImGui::Text("--- Sampling---");
+    if (ImGui::Checkbox("Enable Antialiasing", &guiData->antiAliasing)) {
+        iteration = 0;
+        camchanged = true;
+    }
+    int prevStrata = guiData->Strata;
+    if (guiData->antiAliasing) {
+        if (ImGui::Checkbox("Enable Stratified Sampling", &guiData->StratifiedSampling)) {
+            iteration = 0; camchanged = true;
+        }
+        if (guiData->StratifiedSampling) {
+            if (ImGui::SliderInt("Grid Size", &guiData->Strata, 1, 12)) {
+                iteration = 0; camchanged = true;
+            }
+        }
+        if (ImGui::Checkbox("Enable Sobol Sampling", &guiData->SobolSampling)) {
+            iteration = 0; camchanged = true;
+        }
+    }
+    
+    
     
 
     ImGui::Text("--- Shading ---");
@@ -348,25 +381,45 @@ void RenderImGui()
         camchanged = true;
     }
     if (guiData->DirectLighting) {
-        if (ImGui::Checkbox("Show BSDF Bounce Contribution", &guiData->ShowBSDFContrib)) {
-            iteration = 0;
-            camchanged = true;
-        }
-        if (ImGui::Checkbox("Show Shadow Ray Contribution", &guiData->ShowShadowContrib)) {
-            iteration = 0;
-            camchanged = true;
+        if (ImGui::SliderInt("# rays", &guiData->NumShadowRays, 1, 8)) {
+            iteration = 0; camchanged = true;
         }
     }
-    if (ImGui::Checkbox("Enable Material Sorting", &guiData->SortMaterial)) {
-        iteration = 0;
-        camchanged = true;
+    if (!guiData->wavefront) {
+        if (ImGui::Checkbox("Enable Material Sorting", &guiData->SortMaterial)) {
+            iteration = 0; camchanged = true;
+        }
+        if (ImGui::Checkbox("Enable Compaction", &guiData->useCompaction)) {
+            iteration = 0; camchanged = true;
+        }
+    }
+    
+
+
+
+    ImGui::Text("--- Debug ---");
+    if (ImGui::Checkbox("Debug Console Prints", &guiData->printDebugStats)) {
+        iteration = 0; camchanged = true;
+    }
+    if (ImGui::Checkbox("Show Emissive Rays", &guiData->showEmissive)) {
+        iteration = 0; camchanged = true;
+    }
+    if (ImGui::Checkbox("Show Refractive Rays", &guiData->showRefractive)) {
+        iteration = 0; camchanged = true;
+    }
+    if (ImGui::Checkbox("Show Specular Rays", &guiData->showSpecular)) {
+        iteration = 0; camchanged = true;
+    }
+    if (ImGui::Checkbox("Show Diffuse Rays", &guiData->showDiffuse)) {
+        iteration = 0; camchanged = true;
+    }
+    if (guiData->DirectLighting) {
+        if (ImGui::Checkbox("Show Shadow Rays", &guiData->showShadows)) {
+            iteration = 0; camchanged = true;
+        }
     }
 
-    ImGui::Text("--- Path Termination ---");
-    if (ImGui::Checkbox("Enable Russian Roulette", &guiData->RussianRoulette)) {
-        iteration = 0;
-        camchanged = true;
-    }
+
     ImGui::End();
 
 
@@ -444,6 +497,8 @@ int main(int argc, char** argv)
     // Set up camera stuff from loaded path tracer settings
     iteration = 0;
     renderState = &scene->state;
+    defaultIter = renderState->iterations;
+    sprintf(buffer, "default (%d)", defaultIter);
     Camera& cam = renderState->camera;
     width = cam.resolution.x;
     height = cam.resolution.y;
@@ -531,8 +586,9 @@ void runCuda()
 
     if (iteration == 0)
     {
-        pathtraceFree();
-        pathtraceInit(scene);
+        pathtraceFree(guiData->useBVH, guiData->wavefront, guiData->NumShadowRays);
+        pathtraceInit(scene, guiData->useBVH, guiData->wavefront, guiData->NumShadowRays);
+        pathtraceTime = 0;
     }
 
     if (iteration < renderState->iterations)
@@ -542,8 +598,13 @@ void runCuda()
         cudaGLMapBufferObject((void**)&pbo_dptr, pbo);
 
         // execute the kernel
+        auto start = std::chrono::high_resolution_clock::now();
         int frame = 0;
-        pathtrace(pbo_dptr, frame, iteration);
+        pathtrace(pbo_dptr, frame, iteration, guiData->wavefront);
+        cudaDeviceSynchronize();
+        auto end = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<float, std::milli> duration = end - start;
+        pathtraceTime += duration.count();
 
         // unmap buffer object
         cudaGLUnmapBufferObject(pbo);
