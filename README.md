@@ -36,7 +36,7 @@ With Sobol sampling enabled, the random samples come from the quasi-random seque
 
 #### Performance
 
-For the intermediate cornell box test scene, the diffuse BSDF adds roughly 7.5% overhead compared to the baseline "fake" shader (12.7 ms/frame vs 13.6 ms/frame).
+For the simple cornell box scene above, the diffuse BSDF adds roughly 7.5% overhead compared to the baseline "fake" shader (12.7 ms/frame vs 13.6 ms/frame).
 The fake shader emulates rasterizer style shading that terminates rays immediately after the first hit.
 The diffuse BSDF overhead comes from hemisphere sampling, constructing the local coordinate frame, evaluating the BSDF PDF, and continuing the path through multiple bounces.
 The cost is reasonable, given that the diffuse shader implements actual light transport while the fake shader just approximates surface appearance in a single pass.
@@ -57,7 +57,7 @@ Implementing importance sampling for materials could be beneficial, as the sampl
 
 ### Stream Compaction
 
-This path tracer implements stream compaction which moves active rays to the front of the array and dead rays to the back, allowing later kernel launches to process only the active rays rather than the full array.
+Stream compaction moves active rays to the front of the array and dead rays to the back, allowing later kernel launches in the path tracer to process only the active rays rather than the full array.
 
 #### Implementation
 
@@ -77,8 +77,6 @@ The idea is that by compacting the ray array after each bounce, only the survivi
 In the closed scene, rays persist across more bounces, which limits the relative benefit of compaction since fewer rays terminate early.
 
 ![Rays Alive after Compaction](img/open_closed.png)
-<br>
-<sub>*Number of active rays in the array after compaction during the very first iteration*</sub>
 
 The graph below shows the execution time of individual kernels with and without compaction across all bounce depths.
 Without compaction, each kernel processes the full array of 640,000 rays resulting in consistent intersect and shade times that hover around 0.6 to 1.3 ms per bounce.
@@ -89,8 +87,6 @@ However, these savings are completely overshadowed by the cost of the compaction
 This overhead accumulates quickly, leading to the total frame time ballooning to 21.279 ms which is around 60% slower than the uncompacted baseline.
 
 ![Rays Alive after Compaction](img/compaction_subtiming.png)
-<br>
-<sub>*Time in ms for the different kernels in the main loop with and without compaction during the very first iteration*</sub>
 
 While this version uses shared memory, testing against the non-shared memory version makes the situation even worse. The total frame time spikes to 23.372 ms, as the kernel time for compaction almost doubles.
 Thus both work-efficient stream compaction implementations (adapted from Project 2) do not offer a substantial benefit here.
@@ -144,6 +140,8 @@ Anti-aliasing eliminates jagged edges on geometry by jittering ray origins withi
 | AA disabled | AA enabled |
 | --- | --- |
 | ![AA disabled](img/sphere_simple.png) | ![AA enabled](img/sphere_aa.png) |
+<br>
+<sub>*Anit-Aliasing smoothes out jagged edges along curved or diagonal edges. These comparisons highlight the difference AA makes (particularly where the circle approaches a perfectly horizontal or vertical line*</sub>
 
 #### Implementation
 
@@ -175,6 +173,8 @@ This path tracer implements specular reflective materials and basic refractive m
 | Diffuse Sphere | Refractive Sphere | Specular Sphere |
 | --- | --- | --- |
 | ![Diffuse sphere](img/baseline_simple.png) | ![Refractive sphere](img/baseline_refractive.png) | ![Specular sphere](img/baseline_specular.png) |
+<br>
+<sub>*Showing the material capabilities of the tracer*</sub>
 
 #### Implementation
 
@@ -187,7 +187,7 @@ Both specular and refractive interactions are marked as delta distributions for 
 
 #### Performance
 
-The frametimes for the different materials for this simple scene are within 5%, with specular doing marginally better probably because of its deterministic, non-branching computation path.
+The frametimes for the different materials for the simple cornell box scene above are within 5%, with specular doing marginally better probably because of its deterministic, non-branching computation path.
 Scaling this up to 3 scenes, reveals that they all scale at approximately the same rate for increasing scene complexity.
 This is the expected behavior, since in all cases the ray gets manipulated (scattered, reflected, transmitted) and then continues onward.
 Performance is expected to get worse as more geometry is added into a scene and it appears that the material type does not substantially affect this scaling.
@@ -195,18 +195,6 @@ Performance is expected to get worse as more geometry is added into a scene and 
 ![Material Performance Differences](img/perf_materials.png)
 <br>
 <sub>*Bar chart showing the performance differences between the material types and how they scale with adding more objects of the same type*</sub>
-
-<details>
-  <summary>Raw Data</summary>
-  
-
-| Number of spheres | Diffuse (ms/frame) | Refractive (ms/frame) | Specular (ms/frame) |
-|-------|-------------------|---------------------|---------------------|
-| 1     | 22.70             | 23.15               | 22.66               |
-| 2     | 23.547            | 24.01               | 23.51               |
-| 3     | 24.531            | 25.02               | 24.42               |
-
-</details>
 
 #### GPU vs CPU
 
@@ -230,6 +218,8 @@ Uniform random sampling can sometimes struggle with subtle low-contrast features
 | Uniform random sampling | Stratified + Sobol sampling |
 | --- | --- |
 | ![Sobol off](img/sobol_off.png) | ![Sobol on](img/sobol_on.png) |
+<br>
+<sub>*Penumbral shadows below the floating sphere are barely visible with sobol sampling but basically invisible with uniform sampling, though the difference is hard to spot*</sub>
 
 #### Implementation
 
@@ -268,6 +258,8 @@ This path tracer implements various real world camera properties like f-stop, fo
 | Pinhole Camera | f/8 | f/2.8 |
 | --- | --- | --- |
 | ![DOF baseline](img/intermed_simple.png) | ![DOF f8](img/intermed_dof_f8.png) | ![DOF f2.8](img/intermed_dof_f2-8.png) |
+<br>
+<sub>*Emulated depth of field for the tracer*</sub>
 
 #### Implementation
 
@@ -298,6 +290,8 @@ Direct lighting with next event estimation (NEE) dramatically accelerates conver
 | No Direct Lighting (at 64spp) | Direct Lighting (at 64spp) |
 | --- | --- |
 | ![No NEE at 64spp](img/intermed_64spp_simple.png) | ![DOF f8](img/intermed_64spp_nee.png) |
+<br>
+<sub>*Direct lighting improves early convergence*</sub>
 
 #### Implementation
 
@@ -350,6 +344,8 @@ Despite all of this, the current implementation provides substantial quality imp
 The path tracer supports loading arbitrary triangle meshes from `.obj` files, to expand the range of geometry that can be rendered beyond the basic primitives.
 
 ![Utah Teapot in Blue](img/teapot_aa.png)
+<br>
+<sub>*Utah teapot `.obj` file loaded in the tracer*</sub>
 
 #### Implementation
 
@@ -502,7 +498,18 @@ The atomic adds prevent race conditions when multiple threads write to the same 
 
 #### Performance
 
-TBA
+The chart below compares per-bounce kernel timings between the baseline path tracer (monolithic shading with sorting and compaction) and the wavefront architecture.
+Across all bounces the wavefront implementation achieves a reduction in total frame time from 25.1 ms/frame for the monolithic pipeline to 17.9 ms/frame for the wavefront pipeline on this scene.
+The timing breakdown shows that the wavefront pipeline reduces shading time and eliminates the heavy sort and compaction overhead of the baseline by merging these operations into the dispatch and consolidation stages.
+
+![Wavefront subtiming](img/wavefront_subtiming.png)
+
+However, the raw tracer without any form of sorting or compaction achieves the best performance overall at 15.524 ms/frame.
+This trend remains, regardless of tested scene, materials and lighting setups.
+This suggests that in the tested scenes, the theoretical benefits of sorting or wavefront scheduling do not offset the additional work introduced by the queue management and kernel orchestration.
+One explanation for this could be that most of these scenes already have good spatial coherence, since adjacent geometry often has the same material which keeps threads within a warp relatively coherent even without sorting.
+The divergence reduction of the wavefront pipeline therefore remains limited for this scope, but for more complex scenes with more varied materials, glossy reflections or rough surfaces, the divergence reduction might make a difference.
+But in the context of this project, the results show that the simpler monolithic approach remains the most efficient while the wavefront structure is more streamlined and offers better maintainability.
 
 #### GPU vs CPU
 
@@ -532,8 +539,10 @@ All performance tests were done on the scene below, unless specified otherwise i
 
 ![Performance baseline](img/intermed_simple.png)
 
-Further, the baseline tracer with material sorting and compaction enabled was used as the reference point (except in the material sorting and compaction sections).
+Further, the baseline tracer with material sorting and compaction enabled was used as the reference point (except in the material sorting, compaction and diffuse BSDF sections) or unless specified otherwise.
 
 ## References
 
-TBA
+- [Utah teapot](https://users.cs.utah.edu/~dejohnso/models/teapot.html)
+- [Stanford bunny](https://graphics.stanford.edu/~mdfisher/Data/Meshes/bunny.obj)
+- [Sponza](https://github.com/jimmiebergmann/Sponza/tree/master)
