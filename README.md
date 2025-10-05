@@ -540,6 +540,7 @@ All performance tests were done on the scene below, unless specified otherwise i
 ![Performance baseline](img/intermed_simple.png)
 
 Further, the baseline tracer with material sorting and compaction enabled was used as the reference point (except in the material sorting, compaction and diffuse BSDF sections) or unless specified otherwise.
+Frame time measurements were averaged over 128 samples (spp) consistently across tests.
 
 ## References
 
