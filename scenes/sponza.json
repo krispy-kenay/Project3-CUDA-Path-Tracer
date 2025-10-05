@@ -1,0 +1,38 @@
+{
+  "Materials": {
+    "sun": {
+      "TYPE": "Emitting",
+      "RGB": [1.0, 0.95, 0.75],
+      "EMITTANCE": 300.0
+    }
+  },
+
+  "Camera": {
+    "RES": [2560, 1440],
+    "FOVY": 40.0,
+    "ITERATIONS": 2,
+    "DEPTH": 8,
+    "FILE": "sponza_showcase",
+    "EYE": [916.0, 1266.0, 0.0],
+    "LOOKAT": [0.0, 380.0, 0.0],
+    "UP": [-0.492, 0.591, 0.005]
+  },
+
+  "Objects": [
+    {
+      "TYPE": "mesh",
+      "FILE": "models/sponza.obj",
+      "MATERIAL": "",
+      "TRANS": [60.519, 126.443, 38.691],
+      "ROTAT": [0.0, 0.0, 0.0],
+      "SCALE": [1.0, 1.0, 1.0]
+    },
+    {
+      "TYPE": "cube",
+      "MATERIAL": "sun",
+      "TRANS": [0.0, 2300.0, 600.0],
+      "ROTAT": [-45.0, 0.0, 0.0],
+      "SCALE": [1000.0, 5.0, 600.0]
+    }
+  ]
+}
