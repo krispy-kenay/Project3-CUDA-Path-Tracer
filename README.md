@@ -141,7 +141,7 @@ Anti-aliasing eliminates jagged edges on geometry by jittering ray origins withi
 | --- | --- |
 | ![AA disabled](img/sphere_simple.png) | ![AA enabled](img/sphere_aa.png) |
 <br>
-<sub>*Anit-Aliasing smoothes out jagged edges along curved or diagonal edges. These comparisons highlight the difference AA makes (particularly where the circle approaches a perfectly horizontal or vertical line*</sub>
+<sub>*Anti-Aliasing smoothes out jagged edges along curved or diagonal edges. These comparisons highlight the difference AA makes (particularly where the circle approaches a perfectly horizontal or vertical line*</sub>
 
 #### Implementation
 
@@ -168,7 +168,7 @@ A CPU implementation would be equally simple but slower due to its sequential na
 
 ### Specular and Refractive Materials
 
-This path tracer implements specular reflective materials and basic refractive materials (no glossy materials or roughness).
+Specular and refractive materials are implemented as delta-distribution BSDFs, allowing the tracer to simulate ideal mirror reflections and light transmission through dielectric surfaces with physically-accurate Fresnel effects.
 
 | Diffuse Sphere | Refractive Sphere | Specular Sphere |
 | --- | --- | --- |
@@ -187,7 +187,7 @@ Both specular and refractive interactions are marked as delta distributions for 
 
 #### Performance
 
-The frametimes for the different materials for the simple cornell box scene above are within 5%, with specular doing marginally better probably because of its deterministic, non-branching computation path.
+The frame times for the different materials for the simple cornell box scene above are within 5%, with specular doing marginally better probably because of its deterministic, non-branching computation path.
 Scaling this up to 3 scenes, reveals that they all scale at approximately the same rate for increasing scene complexity.
 This is the expected behavior, since in all cases the ray gets manipulated (scattered, reflected, transmitted) and then continues onward.
 Performance is expected to get worse as more geometry is added into a scene and it appears that the material type does not substantially affect this scaling.
@@ -212,7 +212,7 @@ Implementing glossy and rough specular materials would greatly enhance the varie
 
 ### Sampling Methods
 
-This path tracer implements stratified sampling with cranley-patterson rotation and low-discrepancy Sobol sequences, both of which aim to reduce variance and improve sample distribution.
+Stratified sampling with cranley-patterson rotation and low-discrepancy Sobol sequences aim to reduce variance and improve sample distribution.
 Uniform random sampling can sometimes struggle with subtle low-contrast features like penumbras, an area that both methods aim to address.
 
 | Uniform random sampling | Stratified + Sobol sampling |
@@ -234,7 +234,7 @@ For the random number generator, the `thrust::default_random_engine rng = makeSe
 
 #### Performance
 
-The performance impact is negligible as all sampling strategies stay within 1% frametime of each other at various sample counts. Therefore, as long as Sobol (+ stratified) sampling generally produces an equivalent or better result than uniform random sampling, it can always be enabled without a meaningful negative impact.
+The performance impact is negligible as all sampling strategies stay within 1% frame time of each other at various sample counts. Therefore, as long as Sobol (+ stratified) sampling generally produces an equivalent or better result than uniform random sampling, it can always be enabled without a meaningful negative impact.
 
 More interestingly, variance calculations also show no meaningful difference between Sobol sampling and uniform random sampling (<1% difference) in most cases.
 This can likely be attributed to the simplicity of most of the tested scenarios.
@@ -310,7 +310,7 @@ The cost grows roughly linearly with shadow ray count since each additional ray 
 For practical uses, 1-2 shadow rays provide a good balance between quality and speed, as the quality at 3000 samples matches what the naive path tracer would achieve at 5000 samples.
 Therefore, the per frame cost pays off when factoring in total convergence time.
 
-![Frame timing with and without NEE](img/nee_frametime.png)
+![Frame timing with and without NEE](img/nee_frame time.png)
 
 Breaking down where the time goes at different bounce depths with 1 shadow ray shows that the NEE overhead is substantial but not too bad.
 At shallow depths (1-2 bounces), the shadow ray processing takes 2.2 ms and 1.4 ms respectively while the main shading kernel roughly doubles from 0.6 ms to 1.5 ms due to the additional shadow ray logic.
@@ -416,7 +416,7 @@ Starting RR at bounce 1 gives roughly a 23% speedup, starting at bounce 3 gives 
 The linear relationship makes sense—higher thresholds mean more rays survive longer, requiring more shader invocations and intersection tests.
 The diminishing returns past threshold 3 suggest that most of the performance benefit comes from killing rays early in their lifetime.
 
-![Frame times with RR enabled](img/rr_frametime.png)
+![Frame times with RR enabled](img/rr_frame time.png)
 
 In simple scenes, even aggressive Russian Roulette does not change rendering behavior by much, even for low sample counts.
 In more complex scenes, it does decrease convergence speed to a degree, but this was not evaluated numerically.
@@ -453,7 +453,7 @@ For moderate complexity meshes (a few thousand triangles), the difference is dra
 Without BVH, even the Utah teapot is closer to seconds per frame than frames per second.
 With BVH enabled, performance returns to near-baseline levels (38.189 ms/frame vs ~30 ms/frame).
 
-![Frame Times for BVH vs no BVH](img/bvh_frametime.png)
+![Frame Times for BVH vs no BVH](img/bvh_frame time.png)
 
 Building the BVH adds some overhead but its negligible compared to even the average frame time at around 9-10 ms.
 Despite the bunny having nearly 20x more triangles than the teapot, the build time only increases by 0.6 ms.
@@ -543,6 +543,7 @@ Further, the baseline tracer with material sorting and compaction enabled was us
 
 ## References
 
+- [tinyobjloader](https://github.com/tinyobjloader/tinyobjloader)
 - [Utah teapot](https://users.cs.utah.edu/~dejohnso/models/teapot.html)
 - [Stanford bunny](https://graphics.stanford.edu/~mdfisher/Data/Meshes/bunny.obj)
 - [Sponza](https://github.com/jimmiebergmann/Sponza/tree/master)
